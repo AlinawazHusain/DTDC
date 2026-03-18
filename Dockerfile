@@ -31,5 +31,12 @@ RUN pip install uvicorn[standard] fastapi
 # ----------------------------
 # Step 3: Run FastAPI
 # ----------------------------
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# EXPOSE 8000
+# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# for vercel deployment
+
+EXPOSE 3000
+
+# Run FastAPI with $PORT fallback
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-3000}"]
