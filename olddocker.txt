@@ -1,9 +1,7 @@
-# ----------------------------
-# Base image: Python + Node for building frontend
-# ----------------------------
+# Use Node + Python base image
 FROM python:3.12-slim
 
-# Install Node.js for frontend build
+# Install Node.js (needed for frontend build)
 RUN apt-get update && apt-get install -y curl git build-essential \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -12,7 +10,7 @@ RUN apt-get update && apt-get install -y curl git build-essential \
 
 WORKDIR /app
 
-# Copy the whole project
+# Copy whole project
 COPY . .
 
 # ----------------------------
@@ -21,12 +19,6 @@ COPY . .
 WORKDIR /app/frontend
 RUN npm install
 RUN npm run build
-
-# Copy the build to the path your main.py expects: ../frontend/dist
-RUN mkdir -p /app/frontend/dist
-# This ensures the folder exists even if assets are missing
-# (your main.py references "../frontend/dist")
-RUN cp -r /app/frontend/dist /app/frontend/dist
 
 # ----------------------------
 # Step 2: Install backend dependencies
@@ -37,8 +29,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install uvicorn[standard] fastapi
 
 # ----------------------------
-# Step 3: Run FastAPI on Vercel
+# Step 3: Run FastAPI
 # ----------------------------
-# Vercel injects $PORT dynamically
+# EXPOSE 8000
+# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# for vercel deployment
+
 EXPOSE 3000
+
+# Run FastAPI with $PORT fallback
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-3000}"]
