@@ -10,10 +10,10 @@ import pandas as pd
 app = FastAPI()
 
 # Path to React build folder
-# frontend_build_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
+frontend_build_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 
 # Serve the /assets folder correctly
-frontend_build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/dist"))
+# frontend_build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/dist"))
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_build_path, "assets")), name="assets")
 
 # Serve favicon if you have one
