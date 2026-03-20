@@ -52,7 +52,7 @@ dbname = "dtdc"
 
 db_passsword_cloud = "BdOR4BDP95RgthLq"
 
-DATABASE_URL_CLOUD = f"postgresql+asyncpg://postgres:{db_passsword_cloud}@db.oexrspzxfyjqspxlugav.supabase.co:5432/postgres"
+DATABASE_URL_CLOUD = f"postgresql+asyncpg://postgres:{db_passsword_cloud}@db.oexrspzxfyjqspxlugav.supabase.co:5432/postgres?ssl=require"
 
 
 
