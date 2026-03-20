@@ -50,16 +50,20 @@ dbpassword = "password"
 dbendpoint = "localhost"
 dbname = "dtdc"
 
-db_passsword_cloud = "BdOR4BDP95RgthLq"
+db_passsword_cloud = "jymTCdREQTSWVWqyTcTlBxAhmNVKPpxh"
+db_endpoint_cloud = "postgres.railway.internal" 
+db_user_cloud = "postgres"
+db_name_cloud = "railway"
 
-DATABASE_URL_CLOUD = f"postgresql+asyncpg://postgres:{db_passsword_cloud}@db.oexrspzxfyjqspxlugav.supabase.co:5432/postgres?ssl=require"
 
+DATABASE_URL_CLOUD = f"postgresql+asyncpg://{db_user_cloud}:{db_passsword_cloud}@{db_endpoint_cloud}:5432/{db_name_cloud}?ssl=require"
+DATABASE_PUBLIC_URL = "postgresql+asyncpg://postgres:jymTCdREQTSWVWqyTcTlBxAhmNVKPpxh@ballast.proxy.rlwy.net:12641/railway"
 
 
 DATABASE_URL_ASYNC=f"postgresql+asyncpg://{dbuser}:{dbpassword}@{dbendpoint}:5432/{dbname}"
 
 
-async_engine: AsyncEngine = create_async_engine(DATABASE_URL_CLOUD)
+async_engine: AsyncEngine = create_async_engine(DATABASE_PUBLIC_URL)
 
 AsyncSessionLocal = sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
