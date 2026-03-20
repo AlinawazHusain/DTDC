@@ -111,11 +111,7 @@ export function InvoicePreview() {
               <span style={{ fontSize: 15, color: COLORS.darkMuted }}>{item}</span>
             </div>
           ))}
-          <div style={{ marginTop: 32 }}>
-            <Button onClick={() => navigate('/app/invoices')}>
-              See Invoice Module →
-            </Button>
-          </div>
+
         </div>
 
         {/* Invoice Card */}

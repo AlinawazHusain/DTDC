@@ -56,15 +56,6 @@ export default function HeroSection() {
               Book consignments, generate GST invoices, track payments — from one dashboard.
             </p>
 
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 52 }}>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => navigate('/app/dashboard')}
-              >
-                View Demo Dashboard
-              </Button>
-            </div>
 
           </div>
 

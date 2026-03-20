@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { COLORS, FONTS, RADIUS, SHADOWS } from '../constants/theme'
+import { callApi } from '../utils/api'
 
 const STEPS = ['Account', 'Franchise' , "Welcome"]
 
@@ -13,11 +14,9 @@ export default function SignupPage() {
 
   const [form, setForm] = useState({
     // Step 0 — Account
-    name: '', email: '', phone: '', password: '', confirm: '',
+    name: '', email: '', phone_number: '', password: '', confirm: '',
     // Step 1 — Franchise
-    franchiseName: '', dtdcCode: '', city: '', gstin: '',
-    // Step 2 — Welcome
-    plan: 'growth',
+    frenchise_name: '', dtdc_frenchise_code: '', city: '', gst_number: '',
   })
 
   const set = k => e => {
@@ -31,12 +30,12 @@ export default function SignupPage() {
       if (!form.name)                               e.name     = 'Full name is required'
       if (!form.email)                              e.email    = 'Email is required'
       else if (!/\S+@\S+\.\S+/.test(form.email))   e.email    = 'Enter a valid email'
-      if (!form.phone || form.phone.length < 10)    e.phone    = 'Enter a valid 10-digit mobile'
+      if (!form.phone_number || form.phone_number.length < 10)    e.phone_number  = 'Enter a valid 10-digit mobile'
       if (!form.password || form.password.length < 6) e.password = 'Minimum 6 characters'
       if (form.password !== form.confirm)           e.confirm  = 'Passwords do not match'
     }
     if (step === 1) {
-      if (!form.franchiseName) e.franchiseName = 'Franchise name is required'
+      if (!form.frenchise_name) e.frenchise_name = 'Franchise name is required'
       if (!form.city)          e.city          = 'City is required'
     }
     return e
@@ -50,27 +49,48 @@ export default function SignupPage() {
   }
 
   const handleSubmit = async () => {
-    setLoading(true)
-    await new Promise(r => setTimeout(r, 1600))
-    setLoading(false)
-    navigate('/app/dashboard')
-  }
+    
+      const e = validateStep()
+      if (Object.keys(e).length) { setErrors(e); return }
+  
+      setErrors({})
+      setLoading(true)
 
-  const planOptions = [
-    {
-      id: 'starter', label: 'Starter', price: '₹499', period: '/mo',
-      color: '#6366F1', features: ['200 bookings/month', 'Invoice generation', 'Basic reports', '1 user'],
-    },
-    {
-      id: 'growth', label: 'Growth', price: '₹999', period: '/mo',
-      color: COLORS.primary, tag: 'Most Popular',
-      features: ['Unlimited bookings', 'Branded invoices', 'Advanced analytics', '3 users', 'SMS alerts'],
-    },
-    {
-      id: 'pro', label: 'Pro', price: '₹1,799', period: '/mo',
-      color: COLORS.accent, features: ['Everything in Growth', 'Multi-branch', 'API access', 'Unlimited users'],
-    },
-  ]
+      const body_data = {
+        name: form.name,
+        email: form.email,
+        phone_number: form.phone_number,
+        password: form.password,
+        frenchise_name: form.frenchise_name,
+        city: form.city,
+        dtdc_frenchise_code: form.dtdc_frenchise_code,
+        gst_number : form.gst_number
+      }
+      try {
+        const res = await callApi({
+          url:    '/api/signup',
+          method: 'POST',
+          body:   body_data,
+        })
+        if (res.access_token) {
+          localStorage.setItem('access_token', res.access_token)
+          localStorage.setItem('refresh_token', res.refresh_token)
+          setStep(s => s + 1)
+        } else {
+          setErrors({ password: 'Invalid credentials. Please try again.' })
+        }
+      } catch (err) {
+        console.error(err)
+        setErrors({ password: err.message || 'Signup failed. Please try again.' })
+      } finally {
+        setLoading(false)
+      }
+      
+    }
+  
+
+
+
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: FONTS.body }}>
@@ -201,7 +221,7 @@ export default function SignupPage() {
 
               <FormField label="Full Name *"     type="text"     placeholder="Ramesh Gupta"            value={form.name}     onChange={set('name')}     error={errors.name}     icon="👤" />
               <FormField label="Email address *" type="email"    placeholder="ramesh@myfranchise.in"   value={form.email}    onChange={set('email')}    error={errors.email}    icon="✉️" />
-              <FormField label="Mobile Number *" type="tel"      placeholder="98765 43210"              value={form.phone}    onChange={set('phone')}    error={errors.phone}    icon="📱" />
+              <FormField label="Mobile Number *" type="tel"      placeholder="98765 43210"              value={form.phone_number}    onChange={set('phone_number')}    error={errors.phone_number}    icon="📱" />
               <FormField
                 label="Password *" type={showPw ? 'text' : 'password'}
                 placeholder="Min. 6 characters"
@@ -234,20 +254,20 @@ export default function SignupPage() {
                 subtitle="Used on your invoices and reports"
               />
 
-              <FormField label="Franchise / Business Name *" type="text" placeholder="My Courier Franchise" value={form.franchiseName} onChange={set('franchiseName')} error={errors.franchiseName} icon="🏪" />
+              <FormField label="Franchise / Business Name *" type="text" placeholder="My Courier Franchise" value={form.frenchise_name} onChange={set('frenchise_name')} error={errors.frenchise_name} icon="🏪" />
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <FormField label="City *"             type="text" placeholder="Jaipur"        value={form.city}     onChange={set('city')}     error={errors.city}  icon="📍" />
-                <FormField label="DTDC Franchise Code" type="text" placeholder="DTC-JP-0042"  value={form.dtdcCode} onChange={set('dtdcCode')}               icon="🆔" />
+                <FormField label="DTDC Franchise Code" type="text" placeholder="DTC-JP-0042"  value={form.dtdc_frenchise_code} onChange={set('dtdc_frenchise_code')}               icon="🆔" />
               </div>
 
-              <FormField label="GSTIN (optional)" type="text" placeholder="09ABCDE1234F1Z5" value={form.gstin} onChange={set('gstin')} icon="📋"
+              <FormField label="GSTIN (optional)" type="text" placeholder="09ABCDE1234F1Z5" value={form.gst_number} onChange={set('gst_number')} icon="📋"
                 helpText="You can add this later from Settings → Franchise Profile"
               />
 
               <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                 <BackButton onClick={() => { setStep(0); setErrors({}) }} />
-                <NextButton onClick={handleNext} label="Continue to Signup →" flex />
+                <NextButton onClick={handleSubmit} label="Continue to Signup →" flex />
               </div>
             </div>
           )}

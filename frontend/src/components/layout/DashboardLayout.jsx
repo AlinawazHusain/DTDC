@@ -71,7 +71,13 @@ export default function DashboardLayout({ children }) {
 
             {/* Back to site */}
             <button
-              onClick={() => navigate('/')}
+              onClick={() => {
+                
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+
+                navigate('/')
+              }}
               onMouseEnter={() => setHover(true)}
               onMouseLeave={() => setHover(false)}
               // style={{
