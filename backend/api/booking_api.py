@@ -1,12 +1,13 @@
+import datetime
 from typing import Any
 
 from sqlalchemy.future import select
 from fastapi import APIRouter , Depends , HTTPException
 from pydantic import BaseModel
-from db.tables import Frenchise,  Users , DSRRecord
+from db.tables import Clients, Frenchise,  Users , DSRRecord
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.db import  get_async_db
-from utils import  coerce_value, create_access_token, create_refresh_token, verify_token
+from utils import  coerce_value, create_access_token, create_refresh_token, parse_date, verify_token
 from sqlalchemy import desc
 
 
@@ -179,3 +180,72 @@ async def bookingUpdate(payload: BookingUpdatePayload, db: AsyncSession = Depend
         "message": "Record updated successfully.",
         "data": response_row
     }
+
+
+
+
+
+
+
+
+@booking_router.post("/addBooking")
+async def add_booking(
+    payload: dict, 
+    db: AsyncSession = Depends(get_async_db),
+    user: Users = Depends(verify_token)
+):
+    result = await db.execute(
+        select(Users).where(Users.email == user["email"])
+    )
+    db_user = result.scalar_one_or_none()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not db_user.frenchise_id:
+        raise HTTPException(status_code=400, detail="User has no franchise assigned")
+    
+    frenchise_id = db_user.frenchise_id
+
+
+    dsr_records_to_add = []
+    client_id = payload["client_id"]
+    bookings = payload["bookings"]
+    booking_date = parse_date(payload["booking_date"])
+
+    
+    client = await db.get(Clients, client_id)
+
+    for booking in bookings:
+        # Skip invalid DSR_CNNO
+        if not booking.get("DSR_CNNO"):
+            continue
+
+        record = DSRRecord(
+            frenchise_id=frenchise_id,
+            DSR_CUST_CODE=client.dsr_cust_code,
+            DSR_CNNO=booking.get("DSR_CNNO"),
+            DSR_REFNO=booking.get("DSR_REF_NO"),
+            CHARGEABLE_WEIGHT=float(booking.get("CHARGEABLE_WEIGHT") or 0),
+            RECEIVER_NAME=booking.get("RECEIVER_NAME") or "",
+            RECEIVER_PIN=booking.get("RECEIVER_PIN") or "",
+            CASH_AMT=float(booking.get("CASH_AMOUNT") or 0),
+            UPI_ONLINE_AMT=float(booking.get("UPI_ONLINE_AMOUNT") or 0),
+            CREDIT_AMT=float(booking.get("CREDIT_AMOUNT") or 0),
+            TRANSACTION_REF_NO=booking.get("TRANSACTION_REFNO") or "",
+            PAYMENT_DATE=booking.get("PAYMENT_DATE"),
+            TOTAL_AMOUNT=float(booking.get("TOTAL_AMOUNT") or 0),
+            DSR_REMARKS=booking.get("REMARK") or "",
+            DSR_BOOKING_DATE = booking_date,
+            SOFTDATA_UPLOAD_DATE=datetime.datetime.now()
+        )
+
+        dsr_records_to_add.append(record)
+
+    if not dsr_records_to_add:
+        raise HTTPException(status_code=400, detail="No valid DSR records to insert")
+
+    db.add_all(dsr_records_to_add)
+    await db.commit()
+
+    return {"message": f"{len(dsr_records_to_add)} DSR records added successfully."}

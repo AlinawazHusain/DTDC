@@ -2,12 +2,12 @@ from typing import Optional
 
 from utils import verify_owner_token, verify_token
 from sqlalchemy.future import select
-from fastapi import APIRouter , Depends , HTTPException
+from fastapi import APIRouter , Depends , HTTPException , Query
 from pydantic import BaseModel
 from db.tables import Clients, Frenchise, Users
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.db import  get_async_db
-
+from sqlalchemy import or_
 
 
 client_router = APIRouter()
@@ -166,3 +166,83 @@ async def updateClient(data: updateClientData , db: AsyncSession = Depends(get_a
     await db.refresh(client)
 
     return update_data
+
+
+
+
+@client_router.get("/searchClientsByName")
+async def search_clients_by_name(search: str = Query("", description="Search client by name"),
+                                 db: AsyncSession = Depends(get_async_db),
+                                 user=Depends(verify_token)):
+    
+    result = await db.execute(
+        select(Users).where(Users.email == user["email"])
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    query = select(Clients).where(Clients.frenchise_id == user.frenchise_id)
+
+    if search:
+        query = query.where(
+            or_(
+                Clients.name.ilike(f"%{search}%"),
+            )
+        )
+
+    result = await db.execute(query)
+    clients = result.scalars().all()
+
+
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone_number
+        }
+        for c in clients
+    ]
+
+
+
+
+
+
+
+
+@client_router.get("/searchClientsByPhone")
+async def search_clients_by_phone(search: str = Query("", description="Search client by name"),
+                                  db: AsyncSession = Depends(get_async_db),
+                                  user=Depends(verify_token)
+                                  ):
+    result = await db.execute(
+        select(Users).where(Users.email == user["email"])
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    query = select(Clients).where(Clients.frenchise_id == user.frenchise_id)
+
+    if search:
+        query = query.where(
+            or_(
+                Clients.phone_number.ilike(f"%{search}%"),
+            )
+        )
+
+    result = await db.execute(query)
+    clients = result.scalars().all()
+
+
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone_number
+        }
+        for c in clients
+    ]

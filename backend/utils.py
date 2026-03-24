@@ -134,3 +134,15 @@ def coerce_value(column, value):
 
     except (ValueError, TypeError):
         return None
+    
+
+
+
+
+def parse_date(date_str):
+    """Convert a string YYYY-MM-DD to a datetime.date object, or return None if empty"""
+    if not date_str:
+        return None
+    if isinstance(date_str, date):
+        return date_str  # already a date
+    return datetime.strptime(date_str, "%Y-%m-%d").date()

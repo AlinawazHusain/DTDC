@@ -5,10 +5,10 @@ import StatusBadge from '../../components/common/StatusBadge'
 import Button from '../../components/common/Button'
 import Input from '../../components/common/Input'
 import Modal from '../../components/common/Modal'
-import Badge from '../../components/common/Badge'
 import { COLORS, RADIUS } from '../../constants/theme'
 import { useApp } from '../../context/AppContext'
 import { callApi } from '../../utils/api'
+import { debounce } from 'lodash';
 
 // ─── API Endpoints ─────────────────────────────────────────────────────────────
 const API = {
@@ -17,20 +17,20 @@ const API = {
   upload: '/api/bookingUpload',
 }
 
-// ─── Columns shown in the table (subset of all 83 fields) ─────────────────────
+
+
 const TABLE_COLS = [
-  { key: 'DSR_CNNO',          label: 'AWB/CN No.'  },
-  { key: 'DSR_CUST_CODE',     label: 'Cust Code'   },
-  { key: 'SENDER_NAME',       label: 'Sender'      },
-  { key: 'RECEIVER_NAME',     label: 'Receiver'    },
+  { key: 'DSR_CNNO',          label: 'AWB/CN No.' },
+  { key: 'DSR_CUST_CODE',     label: 'Cust Code' },
+  { key: 'RECEIVER_NAME',     label: 'Receiver' },
   { key: 'DSR_DEST',          label: 'Destination' },
-  { key: 'DSR_CN_TYPE',       label: 'Type'        },
-  { key: 'CHARGEABLE WEIGHT', label: 'Chg. Wt.'   },
-  { key: 'DSR_AMT',           label: 'Amount'      },
-  { key: 'TOTAL AMOUNT',      label: 'Total'       },
-  { key: 'DSR_BOOKING_DATE',  label: 'Booked On'   },
-  { key: 'DSR_STATUS',        label: 'Status'      },
-]
+  { key: 'DSR_CN_TYPE',       label: 'Type' },
+  { key: 'CHARGEABLE_WEIGHT', label: 'Chg. Wt.' },
+  { key: 'DSR_AMT',           label: 'Amount' },
+  { key: 'TOTAL_AMOUNT',      label: 'Total' }, // Updated to match backend
+  { key: 'DSR_BOOKING_DATE',  label: 'Booked On' },
+  { key: 'DSR_STATUS',        label: 'Status' }
+];
 
 // ─── ALL editable fields grouped for the edit modal ───────────────────────────
 const EDIT_SECTIONS = [
@@ -49,14 +49,16 @@ const EDIT_SECTIONS = [
       { key: 'DSR_INVNO',         label: 'Invoice No.'      },
       { key: 'DSR_INVDATE',       label: 'Invoice Date'     },
       { key: 'DSR_VALUE',         label: 'Declared Value'   },
+      { key: 'DSR_BOOKED_BY',     label: 'Booked By'        },
+      { key: 'DSR_DOX',           label: 'DOX'              },
     ],
   },
   {
     title: '⚖️ Weight & Pieces',
     fields: [
-      { key: 'ACTUAL WEIGHT',     label: 'Actual Weight (kg)'      },
-      { key: 'CHARGEABLE WEIGHT', label: 'Chargeable Weight (kg)'  },
-      { key: 'VOLUMETRIC WEIGHT', label: 'Volumetric Weight (kg)'  },
+      { key: 'ACTUAL_WEIGHT',     label: 'Actual Weight (kg)'      },
+      { key: 'CHARGEABLE_WEIGHT', label: 'Chargeable Weight (kg)' },
+      { key: 'VOLUMETRIC_WEIGHT', label: 'Volumetric Weight (kg)' },
       { key: 'DSR_NO_OF_PIECES',  label: 'No. of Pieces'           },
     ],
   },
@@ -96,10 +98,12 @@ const EDIT_SECTIONS = [
       { key: 'FOD_COD_CHARGES', label: 'FoD/CoD Charges'  },
       { key: 'VAS_CHARGES',     label: 'VAS Charges'      },
       { key: 'RISK_SURCHAGES',  label: 'Risk Surcharge'   },
-      { key: 'GST',             label: 'GST'              },
+      { key: 'IGST',            label: 'IGST'             },
+      { key: 'CGST',            label: 'CGST'             },
+      { key: 'SGST',            label: 'SGST'             },
       { key: 'DSR_SERVICE_TAX', label: 'Service Tax'      },
       { key: 'DSR_SPL_DISC',    label: 'Special Discount' },
-      { key: 'TOTAL AMOUNT',    label: 'Total Amount'     },
+      { key: 'TOTAL_AMOUNT',    label: 'Total Amount'     },
       { key: 'FOD_COD_AMT',     label: 'FOD/COD Amount'   },
     ],
   },
@@ -111,7 +115,9 @@ const EDIT_SECTIONS = [
       { key: 'CREDIT_AMT',         label: 'Credit Amount'   },
       { key: 'TRANSACTION_REF_NO', label: 'Transaction Ref' },
       { key: 'PAYMENT_DATE',       label: 'Payment Date'    },
-      { key: 'BILL_TO',            label: 'Bill To'         },
+      { key: 'BILL_TO_CUSTOMER_NAME',    label: 'Bill To Name'    },
+      { key: 'BILL_TO_CUSTOMER_MOBILE_NUMBER', label: 'Bill To Mobile' },
+      { key: 'BILL_TO_CUSTOMER_ADDRESS', label: 'Bill To Address' },
     ],
   },
   {
@@ -148,7 +154,10 @@ const EDIT_SECTIONS = [
     title: '🗒️ FR / Remarks',
     fields: [
       { key: 'FR_STATUS',                   label: 'FR Status'        },
+      { key: 'FR_CS_NAME',                  label: 'FR CS Name'       },
       { key: 'FR_CS_REMARK',                label: 'FR CS Remark'     },
+      { key: 'FR_SALES_PERSON',             label: 'FR Sales Person'  },
+      { key: 'FR_OPS_PERSON',               label: 'FR OPS Person'    },
       { key: 'FR_SALES_OPS_BILLING_REMARK', label: 'Sales/OPS Remark' },
       { key: 'DSR_POD_RECD',                label: 'POD Received'     },
       { key: 'TRANS_STATUS',                label: 'Trans Status'     },
@@ -199,6 +208,32 @@ export default function BookingsPage() {
   const [form, setForm]                   = useState({})
   const [dragOver, setDragOver]           = useState(false)
   const [sortOrder, setSortOrder] = useState('desc') // 'desc' = newest first
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [clients, setClients] = useState([])
+const [clientSearch, setClientSearch] = useState('')
+const [clientPhoneSearch, setClientPhoneSearch] = useState('')
+const [selectedClient, setSelectedClient] = useState(null)
+
+const [showNameDropdown, setShowNameDropdown] = useState(false)
+const [showPhoneDropdown, setShowPhoneDropdown] = useState(false)
+
+  const [newRows, setNewRows] = useState([
+    {
+      DSR_CNNO: '',
+      DSR_REF_NO: '',
+      CHARGEABLE_WEIGHT: '',
+      RECEIVER_NAME: '',
+      RECEIVER_PIN: '',
+      CASH_AMOUNT: '',
+      UPI_ONLINE_AMOUNT: '',
+      CREDIT_AMOUNT: '',
+      TRANSACTION_REFNO: '',
+      PAYMENT_DATE: null,
+      TOTAL_AMOUNT: '',
+      REMARK : ''
+    }
+  ])
   // ── Fetch from API ──────────────────────────────────────────────────────
   const fetchBookings = useCallback(async () => {
     setLoading(true)
@@ -340,6 +375,176 @@ export default function BookingsPage() {
   }
 
   // ── Filter / search ─────────────────────────────────────────────────────
+
+  const addNewRow = () => {
+  setNewRows([
+    ...newRows,
+    {
+      DSR_CNNO: '',
+      DSR_REF_NO: '',
+      CHARGEABLE_WEIGHT: '',
+      RECEIVER_NAME: '',
+      RECEIVER_PIN: '',
+      CASH_AMOUNT: '',
+      UPI_ONLINE_AMOUNT: '',
+      CREDIT_AMOUNT: '',
+      TRANSACTION_REFNO: '',
+      PAYMENT_DATE: null,
+      TOTAL_AMOUNT: '',
+      REMARK : ''
+    }
+  ])
+}
+
+const removeNewRow = (index) => {
+  setNewRows(newRows.filter((_, i) => i !== index))
+}
+
+const handleNewRowChange = (index, key, value) => {
+  const updated = [...newRows]
+  updated[index][key] = value
+  
+  setNewRows(updated)
+}
+
+
+
+const fetchClientsByName = async (value) => {
+  if (!value.trim()) {
+    setClients([])
+    setShowNameDropdown(false)
+    return
+  }
+
+  try {
+    const token = localStorage.getItem('access_token')
+    const res = await callApi({
+      url: `/api/searchClientsByName?name=${value}`,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    console.log("API RESPONSE")
+    console.log(res)
+
+    setClients(res || [])
+    setShowNameDropdown(true)
+  } catch {
+    addToast('Failed to load clients', 'error')
+  }
+}
+
+const fetchClientsByPhone = async (value) => {
+  if (!value.trim()) {
+    setClients([])
+    setShowPhoneDropdown(false)
+    return
+  }
+
+  try {
+    const token = localStorage.getItem('access_token')
+    const res = await callApi({
+      url: `/api/searchClientsByPhone?phone=${value}`,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    setClients(res || [])
+    setShowPhoneDropdown(true)
+  } catch {
+    addToast('Failed to load clients', 'error')
+  }
+}
+
+const debouncedSearchByName = useCallback(
+  debounce((val) => fetchClientsByName(val), 500),
+  []
+)
+
+const debouncedSearchByPhone = useCallback(
+  debounce((val) => fetchClientsByPhone(val), 500),
+  []
+)
+
+
+const handleClientNameSearch = (value) => {
+  setClientSearch(value)
+  setSelectedClient(null)
+  setShowPhoneDropdown(false)
+  debouncedSearchByName(value)
+}
+
+const handleClientPhoneSearch = (value) => {
+  setClientPhoneSearch(value)
+  setSelectedClient(null)
+  setShowNameDropdown(false)
+  debouncedSearchByPhone(value)
+}
+
+
+const handleSelectClient = (client) => {
+  setSelectedClient({
+    id: client.id,
+    name: client.name,
+    phone: client.phone
+  })
+
+  setClientSearch(client.name)
+  setClientPhoneSearch(client.phone)
+
+  setClients([])
+  setShowNameDropdown(false)
+  setShowPhoneDropdown(false)
+}
+
+
+const handleCreateBooking = async () => {
+  if (!selectedClient) {
+    addToast('Please select a client', 'error')
+    return
+  }
+
+  if (newRows.some(item => item.DSR_CNNO === "" || item.DSR_CNNO == null)) {
+    addToast('Please add DSR CCNO', 'error');
+    return;
+  }
+
+  if (newRows.some(item => item.DSR_REF_NO === "" || item.DSR_REF_NO == null)) {
+    addToast('Please add DSR REF No', 'error');
+    return;
+  }
+
+   if (newRows.some(item => item.CHARGEABLE_WEIGHT === "" || item.CHARGEABLE_WEIGHT == null)) {
+    addToast('Please add chargable weight', 'error');
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('access_token')
+
+    const payload = {
+      client_id: selectedClient.id,
+      booking_date: date, 
+      bookings: newRows
+    }
+
+    await callApi({
+      url: '/api/addBooking',
+      method: 'POST',
+      body: payload,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    addToast('Bookings created successfully', 'success')
+    setShowAddModal(false)
+    setNewRows([])
+    fetchBookings()
+
+  } catch {
+    addToast('Failed to create booking', 'error')
+  }
+}
+
+
 const filtered = bookings
   .filter((b) => {
     const q = search.toLowerCase()
@@ -393,6 +598,7 @@ const filtered = bookings
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  console.log('clients:', clients, 'showName:', showNameDropdown)
   return (
     <DashboardLayout>
 
@@ -408,6 +614,9 @@ const filtered = bookings
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Hidden file input */}
+          <Button onClick={() => setShowAddModal(true)}>
+            + Add booking
+          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -696,6 +905,299 @@ const filtered = bookings
             </div>
           </div>
         ))}
+      </Modal>
+
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="➕ Add New Booking"
+        size="full"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowAddModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateBooking}>
+              Submit
+            </Button>
+          </>
+        }
+      >
+        {/* Client Search */}
+        
+        {/* Client Search + Date in one row */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
+
+          {/* Search by Name */}
+          <div style={{ position: 'relative', width: 250 }}>
+            <Input
+              label="Client Name"
+              value={clientSearch}
+              onChange={(e) => handleClientNameSearch(e.target.value)}
+              onFocus={() => clients.length > 0 && setShowNameDropdown(true)}
+            />
+
+            {showNameDropdown && clients.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #ddd',
+                  borderRadius: 6,
+                  zIndex: 9999,
+                  maxHeight: 200,
+                  overflowY: 'auto'
+                }}
+              >
+                {clients.map((client, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleSelectClient(client)}
+                    style={{
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <span>{client.name}</span>
+                    <span>{client.phone}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Search by Phone */}
+          <div style={{ flex: 1, position: 'relative' }}>
+            <Input
+              label="Search Client Phone"
+              value={clientPhoneSearch}
+              onChange={(e) => handleClientPhoneSearch(e.target.value)}
+              // onFocus={() => clients.length > 0 && setShowPhoneDropdown(true)}
+            />
+
+            {showPhoneDropdown && clients.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: `1px solid ${COLORS.grayLight}`,
+                  borderRadius: 6,
+                  zIndex: 9999,
+                  maxHeight: 200,
+                  overflowY: 'auto'
+                }}
+              >
+                {clients.map((client, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleSelectClient(client)}
+                    style={{
+                      padding: '10px 14px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      borderBottom: `1px solid ${COLORS.grayLight}`,
+                      background: '#fff'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = COLORS.bgPage}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                  >
+                    <span style={{ fontWeight: 600, color: COLORS.dark }}>
+                      {client.name}
+                    </span>
+                    <span style={{ color: COLORS.gray }}>
+                      {client.phone}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* Date */}
+          <div style={{ flex: 1 }}>
+            <Input
+              label="Input Date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+
+        </div>
+
+        {/* Selected Client Badge */}
+        {selectedClient && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: COLORS.success + '15', border: `1px solid ${COLORS.success}`,
+            borderRadius: 8, padding: '6px 14px', marginBottom: 16, fontSize: 13,
+          }}>
+            <span>✅</span>
+            <span style={{ fontWeight: 600, color: COLORS.dark }}>{selectedClient.name}</span>
+            <span style={{ color: COLORS.gray }}>{selectedClient.phone}</span>
+            <span
+              onClick={() => { setSelectedClient(null); setClientSearch(''); setClientPhoneSearch('') }}
+              style={{ cursor: 'pointer', color: COLORS.danger, fontWeight: 700, marginLeft: 4 }}
+            >✕</span>
+          </div>
+        )}
+
+        {/* Rows */}
+        {newRows.map((row, index) => (
+          <div
+            key={index}
+            style={{
+              display: 'flex',
+              gap: 10,
+              alignItems: 'center',
+              marginBottom: 10,
+              padding: 10,
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 8,
+              overflowX: 'auto'
+            }}
+          >
+            <Input
+              label="DSR CNNO"
+              required
+              value={row.DSR_CNNO}
+              onChange={(e) =>
+                handleNewRowChange(index, 'DSR_CNNO', e.target.value)
+              }
+              style={{ minWidth: 140 }}
+            />
+
+            <Input
+              label="DSR REF NO"
+              required
+              value={row.DSR_REF_NO}
+              onChange={(e) =>
+                handleNewRowChange(index, 'DSR_REF_NO', e.target.value)
+              }
+              style={{ minWidth: 140 }}
+            />
+
+            <Input
+              label="Chargable Weight"
+              required
+              value={row.CHARGEABLE_WEIGHT}
+              onChange={(e) =>
+                handleNewRowChange(index, 'CHARGEABLE_WEIGHT', e.target.value)
+              }
+              style={{ minWidth: 140 }}
+            />
+
+            <Input
+              label="Receiver name"
+              value={row.RECEIVER_NAME}
+              onChange={(e) =>
+                handleNewRowChange(index, 'RECEIVER_NAME', e.target.value)
+              }
+              style={{ minWidth: 120 }}
+            />
+
+            <Input
+              label="Receiver pin"
+              value={row.RECEIVER_PIN}
+              onChange={(e) =>
+                handleNewRowChange(index, 'RECEIVER_PIN', e.target.value)
+              }
+              style={{ minWidth: 100 }}
+            />
+
+            <Input
+              label="Cash amount"
+              value={row.CASH_AMOUNT}
+              onChange={(e) =>
+                handleNewRowChange(index, 'CASH_AMOUNT', e.target.value)
+              }
+              style={{ minWidth: 100 }}
+            />
+
+            <Input
+              label="Online amount"
+              value={row.UPI_ONLINE_AMOUNT}
+              onChange={(e) =>
+                handleNewRowChange(index, 'UPI_ONLINE_AMOUNT', e.target.value)
+              }
+              style={{ minWidth: 100 }}
+            />
+
+
+            <Input
+              label="Credit amount"
+              value={row.CREDIT_AMOUNT}
+              onChange={(e) =>
+                handleNewRowChange(index, 'CREDIT_AMOUNT', e.target.value)
+              }
+              style={{ minWidth: 100 }}
+            />
+
+
+            <Input
+              label="Transaction ref no"
+              value={row.TRANSACTION_REFNO}
+              onChange={(e) =>
+                handleNewRowChange(index, 'TRANSACTION_REFNO', e.target.value)
+              }
+              style={{ minWidth: 180 }}
+              labelStyle={{ whiteSpace: 'nowrap' }}
+            />
+
+            <Input
+              label="Total"
+              value={row.TOTAL_AMOUNT}
+              onChange={(e) =>
+                handleNewRowChange(index, 'TOTAL_AMOUNT', e.target.value)
+              }
+              style={{ minWidth: 100 }}
+            />
+
+
+            <Input
+              label = "Payment date"
+              type = "date"
+              value={row.PAYMENT_DATE ? row.PAYMENT_DATE.toISOString().split('T')[0] : ''}
+              onChange={(e) =>{
+                const dateValue = e.target.value ? new Date(e.target.value) : null;
+                handleNewRowChange(index, 'PAYMENT_DATE', dateValue)
+              }}
+              style={{ minWidth: 100 }}
+            />
+
+
+            <Input
+              label="Reamrk"
+              value={row.REMARK}
+              onChange={(e) =>
+                handleNewRowChange(index, 'REMARK', e.target.value)
+              }
+              style={{ minWidth: 200 }}
+            />
+
+            {/* 🔥 Remove button per row */}
+            <Button
+              variant="outline"
+              onClick={() => removeNewRow(index)}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              ❌
+            </Button>
+          </div>
+        ))}
+
+        <Button onClick={addNewRow}>
+          ➕ Add Row
+        </Button>
       </Modal>
 
     </DashboardLayout>

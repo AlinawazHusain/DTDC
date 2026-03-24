@@ -69,119 +69,124 @@ class DSRRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
 
-    # Basic Info
     DSR_BRANCH_CODE = Column(String(100))
     DSR_CNNO = Column(String(100))
     DSR_BOOKED_BY = Column(String(100))
     DSR_CUST_CODE = Column(String(100))
 
-    # Weights
     CHARGEABLE_WEIGHT = Column(Float)
-    VOLUMETRIC_WEIGHT = Column(Float)
-    ACTUAL_WEIGHT = Column(Float)
-
-    # Shipment Details
     DSR_CN_TYPE = Column(String(100))
     DSR_DEST = Column(String(100))
     DSR_MODE = Column(String(100))
     DSR_NO_OF_PIECES = Column(Integer)
     DSR_DEST_PIN = Column(String(100))
 
-    # Dates & Times
     DSR_BOOKING_DATE = Column(Date)
-    DSR_BOOKING_TIME = Column(Time)
-    MOD_DATE = Column(Date)
-    MOD_TIME = Column(Time)
-    SOFTDATA_UPLOAD_DATE = Column(DateTime)
-
-    # Financials
     DSR_AMT = Column(Float)
-    DSR_SERVICE_TAX = Column(Float)
-    DSR_SPL_DISC = Column(Float)
-    DSR_VALUE = Column(Float)
-
-    FREIGHT_CHARGES = Column(Float)
-    FOD_COD_CHARGES = Column(Float)
-    VAS_CHARGES = Column(Float)
-    RISK_SURCHAGES = Column(Float)
-    GST = Column(Float)
-    TOTAL_AMOUNT = Column(Float)
-
-    CASH_AMT = Column(Float)
-    UPI_ONLINE_AMT = Column(Float)
-    CREDIT_AMT = Column(Float)
-
-    # Status & Flags
     DSR_STATUS = Column(String(100))
     DSR_POD_RECD = Column(String(100))
-    TRANS_STATUS = Column(String(100))
-    FR_STATUS = Column(String(100))
-
-    # References
     DSR_TRANSMF_NO = Column(String(100))
+    DSR_BOOKING_TIME = Column(Time)
+
+    DSR_DOX = Column(String(100))
+
+    DSR_SERVICE_TAX = Column(Float)
+    DSR_SPL_DISC = Column(Float)
+    DSR_CONTENTS = Column(String(255))
+    DSR_REMARKS = Column(String(255))
+    DSR_VALUE = Column(Float)
+
+    DSR_INVNO = Column(String(100))
+    DSR_INVDATE = Column(Date)
+
+    MOD_DATE = Column(Date)
+    OFFICE_TYPE = Column(String(100))
+    OFFICE_CODE = Column(String(100))
     DSR_REFNO = Column(String(100))
-    TRANSACTION_REF_NO = Column(String(100))
-    PI_NO = Column(String(100))
-    INVOICE_NO = Column(String(100))
+    MOD_TIME = Column(Time)
 
-    # Dates (More)
-    PAYMENT_DATE = Column(Date)
-    PI_DATE = Column(Date)
-    INVOICE_DATE = Column(Date)
-    EDD_DATE = Column(Date)
-    DELIVERED_DATE = Column(Date)
-    RTO_RECEIPT_DATE = Column(Date)
-    RTO_DELIVERY_DATE = Column(Date)
+    NODEID = Column(String(100))
+    USERID = Column(String(100))
+    TRANS_STATUS = Column(String(100))
+    DSR_ACT_CUST_CODE = Column(String(100))
 
-    # Parties
+    DSR_MOBILE = Column(String(15))
+    DSR_EMAIL = Column(String(250))
+    DSR_NDX_PAPER = Column(String(100))
+    DSR_PICKUP_TIME = Column(Time)
+
+    VOLUMETRIC_WEIGHT = Column(Float)
+    ACTUAL_WEIGHT = Column(Float)
+
+    DSR_ID_NUM = Column(String(100))
+    FR_DP_CODE = Column(String(100))
+    BKG_PINCODE = Column(String(100))
+
+    SOFTDATA_UPLOAD_DATE = Column(DateTime)
+
+    BILL_TO_CUSTOMER_MOBILE_NUMBER = Column(String(15))
+    BILL_TO_CUSTOMER_NAME = Column(String(150))
+    BILL_TO_CUSTOMER_ADDRESS = Column(String(255))
+
+    SENDER_MOBILE = Column(String(15))
     SENDER_NAME = Column(String(150))
     SENDER_ADDRESS = Column(String(255))
-    SENDER_MOBILE = Column(String(15))
     SENDER_PIN = Column(String(15))
 
     RECEIVER_NAME = Column(String(150))
     RECEIVER_ADDRESS = Column(String(255))
     RECEIVER_PIN = Column(String(15))
 
-    # Contact
-    DSR_MOBILE = Column(String(15))
-    DSR_EMAIL = Column(String(250))
+    FOD_COD_AMT = Column(Float)
 
-    # Misc
-    DSR_CONTENTS = Column(String(255))
-    DSR_REMARKS = Column(String(255))
-    LAST_STATUS_DESCRIPTION = Column(String(255))
-    RECEIVED_BY = Column(String(250))
-
-    # Logistics
     CARRIER_NAME = Column(String(250))
     CARRIER_AWB = Column(String(250))
+
+    FREIGHT_CHARGES = Column(Float)
+    FOD_COD_CHARGES = Column(Float)
+    VAS_CHARGES = Column(Float)
+    RISK_SURCHAGES = Column(Float)
+
+    IGST = Column(Float)
+    CGST = Column(Float)
+    SGST = Column(Float)
+
+    TOTAL_AMOUNT = Column(Float)
+
+    CASH_AMT = Column(Float)
+    UPI_ONLINE_AMT = Column(Float)
+    CREDIT_AMT = Column(Float)
+
+    TRANSACTION_REF_NO = Column(String(100))
+
+    PAYMENT_DATE = Column(Date)
+    PI_NO = Column(String(100))
+    PI_DATE = Column(Date)
+
+    INVOICE_NO = Column(String(100))
+    INVOICE_DATE = Column(Date)
+
     DESTINATION_BRANCH_NAME = Column(String(250))
+    EDD_DATE = Column(Date)
+
+    LAST_STATUS_DESCRIPTION = Column(String(255))
+    DELIVERED_DATE = Column(Date)
+    RECEIVED_BY = Column(String(250))
+
+    RTO_RECEIPT_DATE = Column(Date)
+    RTO_DELIVERY_DATE = Column(Date)
 
     DISPATCH_MENIFEST_NO = Column(String(100))
     DELIVERY_MENIFEST_NO = Column(String(100))
 
-    # Links
     POD_LINK = Column(String(255))
     SHPT_DOC_LINK = Column(String(255))
 
-    # Extra Fields
-    OFFICE_TYPE = Column(String(100))
-    OFFICE_CODE = Column(String(100))
-    NODEID = Column(String(100))
-    USERID = Column(String(100))
-
-    DSR_ACT_CUST_CODE = Column(String(100))
-    DSR_NDX_PAPER = Column(String(100))
-    DSR_PICKUP_TIME = Column(Time)
-    DSR_ID_NUM = Column(String(100))
-    FR_DP_CODE = Column(String(100))
-    BKG_PINCODE = Column(String(100))
-    BILL_TO = Column(String(100))
-
-    FOD_COD_AMT = Column(Float)
-
+    FR_STATUS = Column(String(100))
+    FR_CS_NAME = Column(String(150))
     FR_CS_REMARK = Column(String(255))
+    FR_SALES_PERSON = Column(String(150))
+    FR_OPS_PERSON = Column(String(150))
     FR_SALES_OPS_BILLING_REMARK = Column(String(255))
 
 
