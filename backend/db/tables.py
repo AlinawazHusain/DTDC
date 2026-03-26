@@ -1,6 +1,8 @@
 from sqlalchemy import (
-    Column, String, Integer, Float, Date, DateTime , Time , Enum, ForeignKey , Boolean , Sequence , text
+    Column, String, Integer, Float, Date, DateTime , Time , Enum, ForeignKey , Boolean , Sequence , text ,  UniqueConstraint , JSON
 )
+from sqlalchemy.orm import relationship
+from datetime import datetime
 from db.base import Base
 import enum
 
@@ -193,28 +195,77 @@ class DSRRecord(Base):
 
 
 
-class PaymentStatus(enum.Enum):
-    pending = "pending"
-    paid = "paid"
-    cancled = "cancled"
-
-
 class Invoice(Base):
     __tablename__ = "invoices"
 
-    invoice_seq = Sequence('invoice_seq', start=1, increment=1, metadata=Base.metadata)
-
     id = Column(Integer, primary_key=True, autoincrement=True)
-    invoice_number = Column(String, unique=True, nullable=False, index=True, server_default=text("'INV-' || nextval('invoice_seq'::regclass)"))
+    invoice_no = Column(String(100), unique=True, nullable=False)
+    invoice_date = Column(Date, default=datetime.now)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
 
-    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=False)
-    client_id= Column(Integer)
-    invoice_date = Column(DateTime)
-    
-    total_amount = Column(Float)
-    gst_amount = Column(Float)
-    other_charges = Column(Float)
-    
-    dsr_ids = Column(String(255))
+    total_bookings = Column(Integer, nullable=False)
+    subtotal = Column(Float, nullable=False, default=0.0)
+    cgst = Column(Float, nullable=False, default=0.0)
+    sgst = Column(Float, nullable=False, default=0.0)
+    igst = Column(Float, nullable=False, default=0.0)
+    grand_total = Column(Float, nullable=False, default=0.0)
 
-    status = Column(Enum(PaymentStatus), nullable=False , default = "pending") 
+    dsr_ids = Column(JSON, nullable=False)  # Store list of DSRRecord IDs
+
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # Optional relationship
+    client = relationship("Clients", backref="invoices")
+    frenchise = relationship("Frenchise", backref="invoices")
+
+
+
+
+
+
+
+
+
+class RatePlan(Base):
+    """One plan per client. Upserted on save."""
+    __tablename__ = "rate_plans"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, nullable=False)
+    name       = Column(String(120), nullable=True)          # e.g. "Sun Pharma – Standard"
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    slabs  = relationship(
+        "RateSlab",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="RateSlab.min_weight",
+    )
+
+
+class RateSlab(Base):
+    """
+    Weight band → rate.
+
+    Example rows for a plan:
+      min=0,   max=1,    rate=5.0   →  0–1 kg   ₹5/kg
+      min=1,   max=2,    rate=8.0   →  1–2 kg   ₹8/kg
+      min=2,   max=None, rate=12.0  →  2 kg+    ₹12/kg
+    """
+    __tablename__ = "rate_slabs"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    plan_id     = Column(Integer, ForeignKey("rate_plans.id", ondelete="CASCADE"), nullable=False)
+    min_weight  = Column(Float, nullable=False)          # kg (inclusive)
+    max_weight  = Column(Float, nullable=True)           # kg (exclusive); NULL = unlimited
+    rate_per_kg = Column(Float, nullable=False)          # ₹ per kg within this band
+
+    plan = relationship("RatePlan", back_populates="slabs")
+
+    __table_args__ = (
+        UniqueConstraint("plan_id", "min_weight", name="uq_plan_min_weight"),
+    )
+

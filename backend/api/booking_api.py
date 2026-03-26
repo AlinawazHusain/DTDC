@@ -2,13 +2,13 @@ import datetime
 from typing import Any
 
 from sqlalchemy.future import select
-from fastapi import APIRouter , Depends , HTTPException
+from fastapi import APIRouter , Depends , HTTPException, status
 from pydantic import BaseModel
-from db.tables import Clients, Frenchise,  Users , DSRRecord
+from db.tables import Clients, Frenchise, Invoice,  Users , DSRRecord
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.db import  get_async_db
 from utils import  coerce_value, create_access_token, create_refresh_token, parse_date, verify_token
-from sqlalchemy import desc
+from sqlalchemy import desc , delete, update
 
 
 
@@ -220,27 +220,34 @@ async def add_booking(
         # Skip invalid DSR_CNNO
         if not booking.get("DSR_CNNO"):
             continue
-
-        record = DSRRecord(
-            frenchise_id=frenchise_id,
-            DSR_CUST_CODE=client.dsr_cust_code,
-            DSR_CNNO=booking.get("DSR_CNNO"),
-            DSR_REFNO=booking.get("DSR_REF_NO"),
-            CHARGEABLE_WEIGHT=float(booking.get("CHARGEABLE_WEIGHT") or 0),
-            RECEIVER_NAME=booking.get("RECEIVER_NAME") or "",
-            RECEIVER_PIN=booking.get("RECEIVER_PIN") or "",
-            CASH_AMT=float(booking.get("CASH_AMOUNT") or 0),
-            UPI_ONLINE_AMT=float(booking.get("UPI_ONLINE_AMOUNT") or 0),
-            CREDIT_AMT=float(booking.get("CREDIT_AMOUNT") or 0),
-            TRANSACTION_REF_NO=booking.get("TRANSACTION_REFNO") or "",
-            PAYMENT_DATE=booking.get("PAYMENT_DATE"),
-            TOTAL_AMOUNT=float(booking.get("TOTAL_AMOUNT") or 0),
-            DSR_REMARKS=booking.get("REMARK") or "",
-            DSR_BOOKING_DATE = booking_date,
-            SOFTDATA_UPLOAD_DATE=datetime.datetime.now()
+        existing = await db.execute(
+            select(DSRRecord).where(
+                DSRRecord.DSR_CNNO == booking.get("DSR_CNNO"),
+                DSRRecord.DSR_BOOKING_DATE == booking_date
+            )
         )
+        existing_record = existing.scalar_one_or_none()
+        if not existing_record:
+            record = DSRRecord(
+                frenchise_id=frenchise_id,
+                DSR_CUST_CODE=client.dsr_cust_code,
+                DSR_CNNO=booking.get("DSR_CNNO"),
+                DSR_REFNO=booking.get("DSR_REF_NO"),
+                CHARGEABLE_WEIGHT=float(booking.get("CHARGEABLE_WEIGHT") or 0),
+                RECEIVER_NAME=booking.get("RECEIVER_NAME") or "",
+                RECEIVER_PIN=booking.get("RECEIVER_PIN") or "",
+                CASH_AMT=float(booking.get("CASH_AMOUNT") or 0),
+                UPI_ONLINE_AMT=float(booking.get("UPI_ONLINE_AMOUNT") or 0),
+                CREDIT_AMT=float(booking.get("CREDIT_AMOUNT") or 0),
+                TRANSACTION_REF_NO=booking.get("TRANSACTION_REFNO") or "",
+                PAYMENT_DATE=booking.get("PAYMENT_DATE"),
+                TOTAL_AMOUNT=float(booking.get("TOTAL_AMOUNT") or 0),
+                DSR_REMARKS=booking.get("REMARK") or "",
+                DSR_BOOKING_DATE = booking_date,
+                SOFTDATA_UPLOAD_DATE=datetime.datetime.now()
+            )
 
-        dsr_records_to_add.append(record)
+            dsr_records_to_add.append(record)
 
     if not dsr_records_to_add:
         raise HTTPException(status_code=400, detail="No valid DSR records to insert")
@@ -249,3 +256,138 @@ async def add_booking(
     await db.commit()
 
     return {"message": f"{len(dsr_records_to_add)} DSR records added successfully."}
+
+
+
+@booking_router.delete("/deleteBooking")
+async def delete_booking(
+    payload: dict, 
+    db: AsyncSession = Depends(get_async_db),
+    user: Users = Depends(verify_token)
+):
+    booking_id = payload.get("id")
+    if not booking_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking ID is required"
+        )
+
+    # Perform delete
+    stmt = delete(DSRRecord).where(DSRRecord.id == booking_id)
+    result = await db.execute(stmt)
+
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found"
+        )
+
+    await db.commit()
+    return {"status": "Success", "deleted_id": booking_id}
+
+
+
+@booking_router.post("/generateInvoice")
+async def generate_invoice(
+    payload: dict, 
+    db: AsyncSession = Depends(get_async_db),
+    user: Users = Depends(verify_token)
+):
+    booking_ids = payload.get("booking_ids")
+    if not booking_ids or not isinstance(booking_ids, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="booking_ids must be a non-empty list"
+        )
+
+    # Fetch DSR records
+    stmt = select(DSRRecord).where(DSRRecord.id.in_(booking_ids))
+    result = await db.execute(stmt)
+    dsr_records = result.scalars().all()
+    if not dsr_records:
+        raise HTTPException(status_code=404, detail="No DSR records found for provided IDs")
+
+    # Ensure all DSR records are for the same client
+    client_codes = set(record.DSR_CUST_CODE for record in dsr_records)
+    if len(client_codes) > 1:
+        raise HTTPException(status_code=400, detail="All DSR records must belong to the same client")
+    client_code = client_codes.pop()
+
+    # Fetch client
+    stmt_client = select(Clients).where(Clients.dsr_cust_code == client_code)
+    client = (await db.execute(stmt_client)).scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Fetch franchise info
+    frenchise_id = dsr_records[0].frenchise_id
+    stmt_frenchise = select(Frenchise).where(Frenchise.id == frenchise_id)
+    frenchise = (await db.execute(stmt_frenchise)).scalar_one_or_none()
+    if not frenchise:
+        raise HTTPException(status_code=404, detail="Franchise not found")
+
+    # Generate invoice number and date
+    invoice_no = f"INV-{client.id}-{int(datetime.datetime.now().timestamp())}"
+    invoice_date = datetime.datetime.now().date()
+
+    # Calculate totals
+    total_freight = sum((r.FREIGHT_CHARGES or 0) for r in dsr_records)
+    total_fod = sum((r.FOD_COD_CHARGES or 0) for r in dsr_records)
+    total_vas = sum((r.VAS_CHARGES or 0) for r in dsr_records)
+    total_risk = sum((r.RISK_SURCHAGES or 0) for r in dsr_records)
+    subtotal = total_freight + total_fod + total_vas + total_risk
+
+    gst_amount = subtotal * 0.18
+    cgst = sgst = gst_amount / 2
+    igst = 0
+    grand_total = subtotal + gst_amount
+
+    # Create invoice in DB
+    new_invoice = Invoice(
+        invoice_no=invoice_no,
+        invoice_date=invoice_date,
+        client_id=client.id,
+        frenchise_id=frenchise.id,
+        total_bookings=len(dsr_records),
+        subtotal=subtotal,
+        cgst=cgst,
+        sgst=sgst,
+        igst=igst,
+        grand_total=grand_total,
+        dsr_ids=booking_ids  # store list of DSRRecord IDs
+    )
+    db.add(new_invoice)
+    await db.commit()
+    await db.refresh(new_invoice)
+
+    # Update DSR records with invoice reference
+    stmt_update = (
+        update(DSRRecord)
+        .where(DSRRecord.id.in_(booking_ids))
+        .values(
+            INVOICE_NO=invoice_no,
+            INVOICE_DATE=invoice_date,
+            TOTAL_AMOUNT=grand_total,
+            CGST=cgst,
+            SGST=sgst,
+            IGST=igst
+        )
+    )
+    await db.execute(stmt_update)
+    await db.commit()
+
+    return {
+        "status": "success",
+        "invoice_id": new_invoice.id,
+        "invoice_no": invoice_no,
+        "invoice_date": str(invoice_date),
+        "client_name": client.name,
+        "frenchise_name": frenchise.frenchise_name,
+        "total_bookings": len(dsr_records),
+        "subtotal": subtotal,
+        "cgst": cgst,
+        "sgst": sgst,
+        "igst": igst,
+        "grand_total": grand_total,
+        "dsr_ids": booking_ids
+    }

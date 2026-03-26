@@ -15,6 +15,8 @@ const API = {
   list:   '/api/bookings',
   update: '/api/bookingUpdate',
   upload: '/api/bookingUpload',
+  delete: '/api/deleteBooking',       // ✅ NEW
+  invoice: '/api/generateInvoice',
 }
 
 
@@ -211,12 +213,13 @@ export default function BookingsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [clients, setClients] = useState([])
-const [clientSearch, setClientSearch] = useState('')
-const [clientPhoneSearch, setClientPhoneSearch] = useState('')
-const [selectedClient, setSelectedClient] = useState(null)
-
-const [showNameDropdown, setShowNameDropdown] = useState(false)
-const [showPhoneDropdown, setShowPhoneDropdown] = useState(false)
+  const [clientSearch, setClientSearch] = useState('')
+  const [clientPhoneSearch, setClientPhoneSearch] = useState('')
+  const [selectedClient, setSelectedClient] = useState(null)
+  const [selectedRows, setSelectedRows] = useState([])
+  const [isCreating, setIsCreating] = useState(false)
+  const [showNameDropdown, setShowNameDropdown] = useState(false)
+  const [showPhoneDropdown, setShowPhoneDropdown] = useState(false)
 
   const [newRows, setNewRows] = useState([
     {
@@ -289,6 +292,74 @@ const [showPhoneDropdown, setShowPhoneDropdown] = useState(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+
+
+  const handleDelete = async (row) => {
+    if (!row.id) {
+      addToast('Cannot delete unsynced row', 'error')
+      return
+    }
+
+    if (!window.confirm(`Delete ${row.DSR_CNNO}?`)) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+
+      await callApi({
+        url: API.delete,
+        method: 'DELETE',
+        body: { id: row.id },
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      setBookings(prev => prev.filter(r => r.id !== row.id))
+      addToast('Deleted successfully', 'success')
+    } catch {
+      addToast('Delete failed', 'error')
+    }
+  }
+
+  const toggleRowSelection = (id) => {
+    setSelectedRows(prev =>
+      prev.includes(id)
+        ? prev.filter(i => i !== id)
+        : [...prev, id]
+    )
+  }
+
+  const toggleSelectAll = () => {
+    const ids = filtered.filter(r => r.id).map(r => r.id)
+
+    setSelectedRows(
+      selectedRows.length === ids.length ? [] : ids
+    )
+  }
+
+
+  const handleGenerateInvoice = async () => {
+    if (selectedRows.length === 0) {
+      addToast('Select at least one row', 'error')
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('access_token')
+
+      await callApi({
+        url: API.invoice,
+        method: 'POST',
+        body: { booking_ids: selectedRows },
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      addToast('Invoice generated', 'success')
+      setSelectedRows([])
+    } catch {
+      addToast('Failed to generate invoice', 'error')
+    }
+  }
+
+
 
   // ── Edit helpers ────────────────────────────────────────────────────────
   const openEdit = (row) => {
@@ -498,6 +569,7 @@ const handleSelectClient = (client) => {
 
 
 const handleCreateBooking = async () => {
+  if (isCreating) return
   if (!selectedClient) {
     addToast('Please select a client', 'error')
     return
@@ -519,6 +591,7 @@ const handleCreateBooking = async () => {
   }
 
   try {
+    setIsCreating(true) 
     const token = localStorage.getItem('access_token')
 
     const payload = {
@@ -541,6 +614,9 @@ const handleCreateBooking = async () => {
 
   } catch {
     addToast('Failed to create booking', 'error')
+  }
+  finally{
+    setIsCreating(false)
   }
 }
 
@@ -614,6 +690,14 @@ const filtered = bookings
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Hidden file input */}
+          <Button
+            icon="🧾"
+            onClick={handleGenerateInvoice}
+            disabled={selectedRows.length === 0}
+          >
+            Generate Invoice ({selectedRows.length})
+          </Button>
+
           <Button onClick={() => setShowAddModal(true)}>
             + Add booking
           </Button>
@@ -686,26 +770,7 @@ const filtered = bookings
         )}
       </div>
 
-      {/* ── Summary Badges ── */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        {[
-          { label: 'Total',      count: counts.total,     color: COLORS.primary },
-          { label: 'In Transit', count: counts.inTransit, color: COLORS.info    },
-          { label: 'Delivered',  count: counts.delivered, color: COLORS.success },
-          { label: 'Booked',     count: counts.booked,    color: COLORS.warning },
-          { label: 'Cancelled',  count: counts.cancelled, color: COLORS.danger  },
-        ].map(s => (
-          <div key={s.label} style={{
-            background: s.color + '12', borderRadius: RADIUS.md,
-            padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, color: s.color }}>
-              {s.count}
-            </span>
-            <span style={{ fontSize: 13, color: COLORS.gray }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
+      
 
       {/* ── Table card ── */}
       <div style={{ background: COLORS.white, borderRadius: RADIUS.lg, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
@@ -730,22 +795,7 @@ const filtered = bookings
               onBlur={e  => e.target.style.borderColor = COLORS.border}
             />
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {STATUSES.map(s => (
-              <button
-                key={s}
-                onClick={() => setFilter(s)}
-                style={{
-                  padding: '6px 14px', borderRadius: RADIUS.full, fontSize: 13,
-                  fontWeight: 500, cursor: 'pointer',
-                  border: `1.5px solid ${filter === s ? COLORS.primary : COLORS.border}`,
-                  background: filter === s ? COLORS.primary : 'transparent',
-                  color: filter === s ? COLORS.white : COLORS.gray,
-                  transition: 'all 0.15s', fontFamily: "'DM Sans', sans-serif",
-                }}
-              >{s}</button>
-            ))}
-          </div>
+          
                     {/* Sort by date */}
           <button
             onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}
@@ -777,59 +827,77 @@ const filtered = bookings
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ background: COLORS.bgPage }}>
+                {/* <tr style={{ background: COLORS.bgPage }}>
                   {[...TABLE_COLS.map(c => c.label), 'Action'].map(h => (
                     <th key={h} style={{
                       padding: '11px 16px', textAlign: 'left',
                       color: COLORS.gray, fontWeight: 600, whiteSpace: 'nowrap', fontSize: 12,
                     }}>{h}</th>
                   ))}
+                </tr> */}
+                <tr style={{ background: COLORS.bgPage }}>
+                  <th style={{ padding: '11px 16px' }}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedRows.length > 0 &&
+                        selectedRows.length === filtered.filter(r => r.id).length
+                      }
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+
+                  {[...TABLE_COLS.map(c => c.label), 'Action'].map(h => (
+                    <th key={h} style={{
+                      padding: '11px 16px',
+                      textAlign: 'left',
+                      color: COLORS.gray,
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      fontSize: 12,
+                    }}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((b, i) => (
-                  <tr
-                    key={b.id ?? b.DSR_CNNO ?? i}
-                    style={{ borderTop: `1px solid ${COLORS.grayLight}` }}
-                    onMouseEnter={e => e.currentTarget.style.background = COLORS.bgPage}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  >
+                  <tr key={b.id ?? b.DSR_CNNO ?? i}>
+                    {/* Checkbox */}
+                    <td style={{ padding: '12px 16px' }}>
+                      {b.id && (
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.includes(b.id)}
+                          onChange={() => toggleRowSelection(b.id)}
+                        />
+                      )}
+                    </td>
+
                     {TABLE_COLS.map(({ key }) => (
                       <td key={key} style={{
-                        padding: '12px 16px', whiteSpace: 'nowrap',
-                        color: key === 'DSR_CNNO' ? COLORS.primary : COLORS.dark,
-                        fontWeight: key === 'DSR_CNNO' ? 700 : key === 'DSR_AMT' || key === 'TOTAL AMOUNT' ? 600 : 400,
+                        padding: '12px 16px',
+                        whiteSpace: 'nowrap'
                       }}>
                         {key === 'DSR_STATUS' ? (
                           <StatusBadge status={b[key] || '—'} />
-                        ) : key === 'DSR_AMT' || key === 'TOTAL AMOUNT' ? (
-                          b[key] != null && b[key] !== '' ? `₹${Number(b[key]).toLocaleString()}` : '—'
+                        ) : key === 'DSR_AMT' || key === 'TOTAL_AMOUNT' ? (
+                          b[key] ? `₹${Number(b[key]).toLocaleString()}` : '—'
                         ) : (
-                          b[key] != null && b[key] !== '' ? String(b[key]) : '—'
+                          b[key] || '—'
                         )}
                       </td>
                     ))}
-                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
-                      {/* Show "local" pill for unsynced Excel rows */}
-                      {!b.id && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, marginRight: 6,
-                          background: COLORS.warning + '20', color: COLORS.warning,
-                          borderRadius: RADIUS.full, padding: '2px 7px',
-                        }}>LOCAL</span>
-                      )}
+
+                    <td style={{ padding: '12px 16px', display: 'flex', gap: 8 }}>
+                      <button onClick={() => openEdit(b)}>✏️</button>
+
                       <button
-                        onClick={() => openEdit(b)}
-                        style={{
-                          padding: '5px 12px', fontSize: 12, fontWeight: 600,
-                          border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.sm,
-                          background: 'transparent', cursor: 'pointer', color: COLORS.dark,
-                          fontFamily: "'DM Sans', sans-serif", transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { e.target.style.background = COLORS.primary; e.target.style.color = '#fff'; e.target.style.borderColor = COLORS.primary }}
-                        onMouseLeave={e => { e.target.style.background = 'transparent'; e.target.style.color = COLORS.dark; e.target.style.borderColor = COLORS.border }}
+                        onClick={() => handleDelete(b)}
+                        style={{ color: COLORS.danger }}
                       >
-                        ✏️ Edit
+                        🗑
                       </button>
                     </td>
                   </tr>
@@ -917,8 +985,8 @@ const filtered = bookings
             <Button variant="ghost" onClick={() => setShowAddModal(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateBooking}>
-              Submit
+            <Button onClick={handleCreateBooking} disabled={isCreating}>
+              {isCreating ? 'Submitting...' : 'Submit'}
             </Button>
           </>
         }
