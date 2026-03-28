@@ -138,7 +138,6 @@ export const SAMPLE_INVOICE = {
 }
 
 export const SIDEBAR_MENU = [
-  { icon: '🏠', label: 'Dashboard',  path: '/app/dashboard' },
   { icon: '📦', label: 'Bookings',   path: '/app/bookings'  },
   { icon: '🧾', label: 'Invoices',   path: '/app/invoices'  },
   { icon: '👥', label: 'Clients',    path: '/app/clients'   },

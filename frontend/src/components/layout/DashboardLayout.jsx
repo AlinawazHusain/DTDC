@@ -14,7 +14,7 @@ export default function DashboardLayout({ children }) {
   const [hover, setHover] = useState(false)
 
   const currentPage = SIDEBAR_MENU.find(m => location.pathname.startsWith(m.path))
-  const pageTitle   = currentPage?.label ?? 'Dashboard'
+  const pageTitle   = currentPage?.label ?? 'settings'
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLORS.bgPage }}>

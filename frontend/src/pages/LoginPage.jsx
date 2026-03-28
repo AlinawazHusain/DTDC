@@ -39,7 +39,7 @@ export default function LoginPage() {
       if (res.access_token) {
         localStorage.setItem('access_token', res.access_token)
         localStorage.setItem('refresh_token', res.refresh_token)
-        navigate('/app/dashboard')
+        navigate('/app/bookings')
       } else {
         setErrors({ password: 'Invalid credentials. Please try again.' })
       }

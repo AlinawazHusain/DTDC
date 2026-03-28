@@ -60,13 +60,13 @@ export default function Sidebar() {
         display: 'flex', alignItems: 'center', gap: 10,
         overflow: 'hidden',
       }}>
-        <div style={{
+        {/* <div style={{
           width: 32, height: 32, borderRadius: '50%',
           background: 'linear-gradient(135deg, #0057FF, #5B8CFF)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 12, fontWeight: 700, color: COLORS.white, flexShrink: 0,
-        }}>RG</div>
-        {sidebarOpen && (
+        }}>RG</div> */}
+        {/* {sidebarOpen && (
           <div style={{ overflow: 'hidden' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.white, whiteSpace: 'nowrap' }}>
               Ramesh Gupta
@@ -74,8 +74,8 @@ export default function Sidebar() {
             <div style={{ fontSize: 11, color: COLORS.gray, whiteSpace: 'nowrap' }}>
               DTDC Franchise, Jaipur
             </div>
-          </div>
-        )}
+          </div> */}
+        {/* )} */}
       </div>
     </aside>
   )

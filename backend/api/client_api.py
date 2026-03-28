@@ -2,7 +2,7 @@ from typing import Optional
 
 from utils import verify_owner_token, verify_token
 from sqlalchemy.future import select
-from fastapi import APIRouter , Depends , HTTPException , Query
+from fastapi import APIRouter , Depends , HTTPException , Query , Form , UploadFile , File
 from pydantic import BaseModel
 from db.tables import Clients, Frenchise, Users
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,7 @@ client_router = APIRouter()
 
 
 @client_router.get("/getClients")
-async def get_settings(db: AsyncSession = Depends(get_async_db) ,user=Depends(verify_token)):  
+async def get_clients(db: AsyncSession = Depends(get_async_db) ,user=Depends(verify_token)):  
 
     result = await db.execute(
         select(Users).where(Users.email == user["email"])
@@ -48,10 +48,14 @@ async def get_settings(db: AsyncSession = Depends(get_async_db) ,user=Depends(ve
             "city": c.city,
             "gst_number": c.gst_number,
             "pan_number": c.pan_number,
-            "dsr_cust_code": c.dsr_cust_code,
+            "dsr_act_cust_code": c.dsr_act_cust_code,
             "address": c.address,
-            "total_business": c.total_business,
-            "due_payment": c.due_payment
+            "tan_number" : c.tan_number,
+            "payment_term" : c.payment_term,
+            "kyc_id_number" : c.kyc_id_number,
+            "kyc_doc_type" :c.kyc_doc_type,
+            "kyc_doc" : c.kyc_doc,
+            "agreement_doc" : c.agreement_doc
         }
         response_data.append(this_client)
 
@@ -72,9 +76,13 @@ class addNewClientData(BaseModel):
     pincode: Optional[str] = ""
     gst_number: Optional[str] = ""
     pan_number: Optional[str] = ""
-    dsr_cust_code:Optional[str] = ""
+    dsr_act_cust_code:Optional[str] = ""
     city: Optional[str] = ""
     address : Optional[str] = ""
+    tan_number : Optional[str] = ""
+    payment_term : Optional[str] = ""
+    kyc_id_number : Optional[str] = ""
+    kyc_doc_type : Optional[str] = ""
 
 
 @client_router.post("/addNewClient")
@@ -99,29 +107,37 @@ async def addNewClient(data: addNewClientData , db: AsyncSession = Depends(get_a
         gst_number = data.gst_number,
         pan_number = data.pan_number,
         city = data.city,
-        dsr_cust_code = data.dsr_cust_code,
+        dsr_act_cust_code = data.dsr_act_cust_code,
         address = data.address,
-        frenchise_id = db_user.frenchise_id
-
+        frenchise_id = db_user.frenchise_id,
+        tan_number = data.tan_number,
+        payment_term = data.payment_term,
+        kyc_id_number = data.kyc_id_number,
+        kyc_doc_type = data.kyc_doc_type,
         )
     db.add(new_client)
     await db.commit()
     await db.refresh(new_client)
     return {
-            "id": new_client.id,
-            "name": new_client.name,
-            "cin_number": new_client.cin_number,
-            "phone_number": new_client.phone_number,
-            "email": new_client.email,
-            "pincode": new_client.pincode,
-            "city": new_client.city,
-            "gst_number": new_client.gst_number,
-            "pan_number": new_client.pan_number,
-            "dsr_cust_code": new_client.dsr_cust_code,
-            "address": new_client.address,
-            "total_business": new_client.total_business,
-            "due_payment": new_client.due_payment
-            }
+        "id": new_client.id,
+        "name": new_client.name,
+        "cin_number": new_client.cin_number,
+        "phone_number": new_client.phone_number,
+        "email": new_client.email,
+        "pincode": new_client.pincode,
+        "city": new_client.city,
+        "gst_number": new_client.gst_number,
+        "pan_number": new_client.pan_number,
+        "dsr_act_cust_code": new_client.dsr_act_cust_code,
+        "address": new_client.address,
+        "tan_number" : new_client.tan_number,
+        "payment_term" : new_client.payment_term,
+        "kyc_id_number" : new_client.kyc_id_number,
+        "kyc_doc_type" :new_client.kyc_doc_type,
+        "kyc_doc" : new_client.kyc_doc,
+        "agreement_doc" : new_client.agreement_doc
+
+        }
 
 
 
@@ -137,9 +153,13 @@ class updateClientData(BaseModel):
     pincode: Optional[str] = ""
     gst_number: Optional[str] = ""
     pan_number: Optional[str] = ""
-    dsr_cust_code:Optional[str] = ""
+    dsr_act_cust_code:Optional[str] = ""
     city: Optional[str] = ""
     address : Optional[str] = ""
+    tan_number : Optional[str] = ""
+    payment_term : Optional[str] = ""
+    kyc_id_number : Optional[str] = ""
+    kyc_doc_type : Optional[str] = ""
 
 
 
@@ -246,3 +266,18 @@ async def search_clients_by_phone(search: str = Query("", description="Search cl
         }
         for c in clients
     ]
+
+
+
+@client_router.post("/uploadClientDoc")
+async def upload_file(
+    client_id: int = Form(...),
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_db),
+    user = Depends(verify_token)
+):
+    print(client_id , doc_type)
+    return {
+        "url" : "https://www.google.com/url?sa=t&source=web&rct=j&url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FWikipedia&ved=0CBYQjRxqFwoTCPCEsaStw5MDFQAAAAAdAAAAABAj&opi=89978449"
+    }

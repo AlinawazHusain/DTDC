@@ -153,7 +153,7 @@ export default function Navbar() {
             Login
           </button> */}
           <button
-            onClick={() => navigate('/app/dashboard')}
+            onClick={() => navigate('/app/settings')}
             style={{
               background: 'transparent',
               border: `2px solid ${COLORS.primary}`,
@@ -178,7 +178,7 @@ export default function Navbar() {
             Login
           </button>
           <Button
-            onClick={() => { navigate('/app/dashboard'); setMobileOpen(false) }}
+            onClick={() => { navigate('/app/settings'); setMobileOpen(false) }}
             fullWidth
           >
             Sign up →

@@ -16,7 +16,7 @@ const COL = {
   AMT:       'DSR_AMT',
   CONTENTS:  'DSR_CONTENTS',
   DOX:       'DSR_DOX',
-  CUST_CODE: 'DSR_CUST_CODE',
+  CUST_CODE: 'DSR_ACT_CUST_CODE',
   PIN:       'DSR_DEST_PIN',
   REFNO:     'DSR_REFNO',
 }

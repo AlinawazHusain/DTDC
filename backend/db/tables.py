@@ -17,25 +17,32 @@ class UserType(enum.Enum):
 class Users(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True , index = True)
     name = Column(String(255))
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True )
     password = Column(String(255), nullable=False)
     user_type = Column(Enum(UserType), nullable=False)
     is_disabled = Column(Boolean , default = False)
-    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
+    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True , index = True)
 
 
 
 class Frenchise(Base):
     __tablename__ = "frenchise"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    frenchise_name = Column(String(255))
+    id = Column(Integer, primary_key=True, autoincrement=True , index = True)
+    frenchise_name = Column(String(255) , index = True)
     owner_name = Column(String(255))
     phone_number = Column(String(15))
     email = Column(String(255))
     gst_number = Column(String(50))
+    tan_number = Column(String(50))
+    kyc_id_number = Column(String(50))
+    kyc_doc_type = Column(String(50))
+    kyc_doc = Column(String(255))
+    agreement_doc = Column(String(255))
+    website_url = Column(String(255))
+    moto = Column(String(255))
     frenchise_code = Column(String(50))
     city = Column(String(50))
     business_address = Column(String(255))
@@ -44,7 +51,7 @@ class Frenchise(Base):
 class Clients(Base):
     __tablename__ = "clients"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True , index = True)
     name = Column(String(255))
     cin_number = Column(String(255))
     phone_number = Column(String(15))
@@ -52,12 +59,16 @@ class Clients(Base):
     pincode = Column(String(10))
     gst_number = Column(String(50))
     pan_number = Column(String(50))
+    tan_number = Column(String(50))
+    payment_term = Column(String(150))
+    kyc_id_number = Column(String(50))
+    kyc_doc_type = Column(String(50))
+    kyc_doc = Column(String(255))
+    agreement_doc = Column(String(255))
     city = Column(String(50))
-    dsr_cust_code = Column(String(50))
+    dsr_act_cust_code = Column(String(50), index = True)
     address = Column(String(255))
 
-    total_business = Column(Float , default = 0.0)
-    due_payment = Column(Float , default = 0.0)
 
     frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
 
@@ -69,12 +80,12 @@ class DSRRecord(Base):
     __tablename__ = "dsr_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
+    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True , index = True)
 
     DSR_BRANCH_CODE = Column(String(100))
     DSR_CNNO = Column(String(100))
     DSR_BOOKED_BY = Column(String(100))
-    DSR_CUST_CODE = Column(String(100))
+    DSR_CUST_CODE = Column(String(100) , index = True)
 
     CHARGEABLE_WEIGHT = Column(Float)
     DSR_CN_TYPE = Column(String(100))
@@ -83,7 +94,7 @@ class DSRRecord(Base):
     DSR_NO_OF_PIECES = Column(Integer)
     DSR_DEST_PIN = Column(String(100))
 
-    DSR_BOOKING_DATE = Column(Date)
+    DSR_BOOKING_DATE = Column(Date , index = True)
     DSR_AMT = Column(Float)
     DSR_STATUS = Column(String(100))
     DSR_POD_RECD = Column(String(100))
@@ -110,7 +121,7 @@ class DSRRecord(Base):
     NODEID = Column(String(100))
     USERID = Column(String(100))
     TRANS_STATUS = Column(String(100))
-    DSR_ACT_CUST_CODE = Column(String(100))
+    DSR_ACT_CUST_CODE = Column(String(100) , index = True)
 
     DSR_MOBILE = Column(String(15))
     DSR_EMAIL = Column(String(250))
@@ -232,9 +243,9 @@ class RatePlan(Base):
     """One plan per client. Upserted on save."""
     __tablename__ = "rate_plans"
 
-    id         = Column(Integer, primary_key=True, index=True)
-    client_id  = Column(Integer, nullable=False)
-    name       = Column(String(120), nullable=True)          # e.g. "Sun Pharma – Standard"
+    id         = Column(Integer, primary_key=True, autoincrement=True, index = True)
+    client_id  = Column(Integer, nullable=False , index = True)  
+    transport_type = Column(String(50), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -257,8 +268,8 @@ class RateSlab(Base):
     """
     __tablename__ = "rate_slabs"
 
-    id          = Column(Integer, primary_key=True, index=True)
-    plan_id     = Column(Integer, ForeignKey("rate_plans.id", ondelete="CASCADE"), nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id     = Column(Integer, ForeignKey("rate_plans.id", ondelete="CASCADE"), nullable=False, index = True)
     min_weight  = Column(Float, nullable=False)          # kg (inclusive)
     max_weight  = Column(Float, nullable=True)           # kg (exclusive); NULL = unlimited
     rate_per_kg = Column(Float, nullable=False)          # ₹ per kg within this band
@@ -269,3 +280,9 @@ class RateSlab(Base):
         UniqueConstraint("plan_id", "min_weight", name="uq_plan_min_weight"),
     )
 
+
+
+class TransportTypes(Base):
+    __tablename__ = "transport_types"
+    id = Column(Integer, primary_key=True, autoincrement=True , index = True)
+    transport_type = Column(String(50), unique = True)

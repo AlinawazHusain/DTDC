@@ -5,7 +5,6 @@ import { AppProvider } from './context/AppContext'
 import LandingPage from './pages/landing/LandingPage'
 
 // App pages
-import DashboardPage from './pages/dashboard/DashboardPage'
 import BookingsPage  from './pages/bookings/BookingsPage'
 import InvoicesPage  from './pages/invoices/InvoicesPage'
 import InvoiceGeneratorPage from './pages/invoices/InvoiceGeneratorPage'
@@ -31,8 +30,7 @@ export default function App() {
 
           {/* App (authenticated) routes */}
           <Route path="/app">
-            <Route index element={<Navigate to="/app/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
+            <Route index element={<Navigate to="/app/bookings" replace />} />
             <Route path="bookings"  element={<BookingsPage />}  />
             <Route path="invoices"  element={<InvoicesPage />}  />
             <Route path="clients"   element={<ClientsPage />}   />

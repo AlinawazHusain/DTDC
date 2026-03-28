@@ -1,5 +1,6 @@
+from bucket_utils import upload_file_to_railway
 from sqlalchemy.future import select
-from fastapi import APIRouter , Depends , HTTPException
+from fastapi import APIRouter , Depends , HTTPException , Form , File , UploadFile
 from pydantic import BaseModel
 from db.tables import Frenchise,  Users
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +51,14 @@ async def get_settings(db: AsyncSession = Depends(get_async_db) ,user=Depends(ve
             "business_address": frenchise.business_address,
             "city" : frenchise.city,
             "gst_number": frenchise.gst_number,
-            "frenchise_code": frenchise.frenchise_code
+            "frenchise_code": frenchise.frenchise_code,
+            "tan_number" : frenchise.tan_number,
+            "kyc_id_number" : frenchise.kyc_id_number,
+            "kyc_doc_type" : frenchise.kyc_doc_type,
+            "kyc_doc" : frenchise.kyc_doc,
+            "agreement_doc" : frenchise.agreement_doc,
+            "website_url" : frenchise.website_url,
+            "moto" : frenchise.moto
         }
     
     users_list = []
@@ -82,6 +90,11 @@ class updateFrenchiseProfileUpdates(BaseModel):
     frenchise_code : str
     city :str
     business_address : str
+    tan_number : str
+    kyc_id_number : str
+    kyc_doc_type : str
+    website_url : str
+    moto : str
 
 @setting_router.put("/updateFrenchiseProfile")
 async def updateFrenchiseProfile(data: updateFrenchiseProfileUpdates , db: AsyncSession = Depends(get_async_db), user=Depends(verify_owner_token)): 
@@ -259,3 +272,18 @@ async def editUser(data:editUserData ,  db: AsyncSession = Depends(get_async_db)
         "message": "set data edited",
         "data": this_user,
     }
+
+
+
+
+@setting_router.post("/uploadFrenchiseDoc")
+async def upload_file(
+    name: str = Form(...),  # 'kyc_doc' or 'agreement_doc'
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_db),
+    user=Depends(verify_owner_token)
+):
+    url = await upload_file_to_railway(file, name)
+    print(url)
+    return {"url" : url}
+    

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import DashboardLayout from '../../components/layout/DashboardLayout'
 import StatusBadge from '../../components/common/StatusBadge'
@@ -8,33 +8,29 @@ import Modal from '../../components/common/Modal'
 import { COLORS, RADIUS } from '../../constants/theme'
 import { useApp } from '../../context/AppContext'
 import { callApi } from '../../utils/api'
-import { debounce } from 'lodash';
+import { debounce } from 'lodash'
 
 // ─── API Endpoints ─────────────────────────────────────────────────────────────
 const API = {
-  list:   '/api/bookings',
-  update: '/api/bookingUpdate',
-  upload: '/api/bookingUpload',
-  delete: '/api/deleteBooking',       // ✅ NEW
-  invoice: '/api/generateInvoice',
+  filter:     '/api/bookings/filter',
+  update:     '/api/bookingUpdate',
+  upload:     '/api/bookingUpload',
+  delete:     '/api/deleteBooking',
+  addBooking: '/api/addBooking',
 }
 
-
-
 const TABLE_COLS = [
-  { key: 'DSR_CNNO',          label: 'AWB/CN No.' },
-  { key: 'DSR_CUST_CODE',     label: 'Cust Code' },
-  { key: 'RECEIVER_NAME',     label: 'Receiver' },
-  { key: 'DSR_DEST',          label: 'Destination' },
-  { key: 'DSR_CN_TYPE',       label: 'Type' },
-  { key: 'CHARGEABLE_WEIGHT', label: 'Chg. Wt.' },
-  { key: 'DSR_AMT',           label: 'Amount' },
-  { key: 'TOTAL_AMOUNT',      label: 'Total' }, // Updated to match backend
-  { key: 'DSR_BOOKING_DATE',  label: 'Booked On' },
-  { key: 'DSR_STATUS',        label: 'Status' }
-];
+  { key: 'client_name',       label: 'Client'       },  // lowercase — as returned by FastAPI
+  { key: 'DSR_CNNO',          label: 'AWB/CN No.'   },
+  { key: 'DSR_ACT_CUST_CODE', label: 'Cust Code'    },
+  { key: 'DSR_DEST',          label: 'Destination'  },
+  { key: 'DSR_DEST_PIN',      label: 'Dest. Pin'    },
+  { key: 'DSR_CN_TYPE',       label: 'Type'         },
+  { key: 'CHARGEABLE_WEIGHT', label: 'Chg. Wt.'     },
+  { key: 'TOTAL_AMOUNT',      label: 'Total'        },
+  { key: 'DSR_BOOKING_DATE',  label: 'Booked On'    },
+]
 
-// ─── ALL editable fields grouped for the edit modal ───────────────────────────
 const EDIT_SECTIONS = [
   {
     title: '📦 Consignment Info',
@@ -58,10 +54,10 @@ const EDIT_SECTIONS = [
   {
     title: '⚖️ Weight & Pieces',
     fields: [
-      { key: 'ACTUAL_WEIGHT',     label: 'Actual Weight (kg)'      },
+      { key: 'ACTUAL_WEIGHT',     label: 'Actual Weight (kg)'     },
       { key: 'CHARGEABLE_WEIGHT', label: 'Chargeable Weight (kg)' },
       { key: 'VOLUMETRIC_WEIGHT', label: 'Volumetric Weight (kg)' },
-      { key: 'DSR_NO_OF_PIECES',  label: 'No. of Pieces'           },
+      { key: 'DSR_NO_OF_PIECES',  label: 'No. of Pieces'          },
     ],
   },
   {
@@ -112,14 +108,14 @@ const EDIT_SECTIONS = [
   {
     title: '💳 Payment',
     fields: [
-      { key: 'CASH_AMT',           label: 'Cash Amount'     },
-      { key: 'UPI_ONLINE_AMT',     label: 'UPI / Online'    },
-      { key: 'CREDIT_AMT',         label: 'Credit Amount'   },
-      { key: 'TRANSACTION_REF_NO', label: 'Transaction Ref' },
-      { key: 'PAYMENT_DATE',       label: 'Payment Date'    },
-      { key: 'BILL_TO_CUSTOMER_NAME',    label: 'Bill To Name'    },
-      { key: 'BILL_TO_CUSTOMER_MOBILE_NUMBER', label: 'Bill To Mobile' },
-      { key: 'BILL_TO_CUSTOMER_ADDRESS', label: 'Bill To Address' },
+      { key: 'CASH_AMT',                       label: 'Cash Amount'     },
+      { key: 'UPI_ONLINE_AMT',                 label: 'UPI / Online'    },
+      { key: 'CREDIT_AMT',                     label: 'Credit Amount'   },
+      { key: 'TRANSACTION_REF_NO',             label: 'Transaction Ref' },
+      { key: 'PAYMENT_DATE',                   label: 'Payment Date'    },
+      { key: 'BILL_TO_CUSTOMER_NAME',          label: 'Bill To Name'    },
+      { key: 'BILL_TO_CUSTOMER_MOBILE_NUMBER', label: 'Bill To Mobile'  },
+      { key: 'BILL_TO_CUSTOMER_ADDRESS',       label: 'Bill To Address' },
     ],
   },
   {
@@ -168,123 +164,227 @@ const EDIT_SECTIONS = [
   },
 ]
 
-const STATUSES = ['All', 'Booked', 'In Transit', 'Delivered', 'Cancelled']
-
-// ─── Parse uploaded xlsx → array of uppercase-keyed row objects ───────────────
+// ─── Parse uploaded xlsx ───────────────────────────────────────────────────────
 function parseXlsx(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(e.target.result, { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
-        // Normalize all keys to UPPERCASE to match backend storage
-        const rows = rawRows.map(row =>
+        const wb   = XLSX.read(e.target.result, { type: 'array' })
+        const ws   = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }).map(row =>
           Object.fromEntries(Object.entries(row).map(([k, v]) => [k.toUpperCase(), v]))
         )
         resolve(rows)
-      } catch (err) {
-        reject(err)
-      }
+      } catch (err) { reject(err) }
     }
     reader.onerror = reject
     reader.readAsArrayBuffer(file)
   })
 }
 
+// ─── Shared cell renderer ──────────────────────────────────────────────────────
+function CellValue({ col, row }) {
+  const val = row[col.key]
+  if (col.key === 'DSR_STATUS')
+    return <StatusBadge status={val || '—'} />
+  if (col.key === 'TOTAL_AMOUNT' || col.key === 'DSR_AMT')
+    return val ? `₹${Number(val).toLocaleString()}` : '—'
+  // client_name comes lowercase from FastAPI — display as-is
+  if (col.key === 'client_name')
+    return val || <span style={{ color: '#bbb', fontStyle: 'italic' }}>—</span>
+  return val || '—'
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function BookingsPage() {
-  const { addToast } = useApp()
-  const fileInputRef = useRef(null)
+  const { addToast }  = useApp()
+  const fileInputRef  = useRef(null)
 
-  const [bookings, setBookings]           = useState([])
-  const [localRows, setLocalRows]         = useState([])   // only rows from Excel, no id yet
-  const [loading, setLoading]             = useState(true)
-  const [uploading, setUploading]         = useState(false)
-  const [saving, setSaving]               = useState(false)
-  const [search, setSearch]               = useState('')
-  const [filter, setFilter]               = useState('All')
-  const [showEditModal, setShowEditModal] = useState(false)
-  const [editingRow, setEditingRow]       = useState(null)
-  const [form, setForm]                   = useState({})
-  const [dragOver, setDragOver]           = useState(false)
-  const [sortOrder, setSortOrder] = useState('desc') // 'desc' = newest first
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [clients, setClients] = useState([])
-  const [clientSearch, setClientSearch] = useState('')
-  const [clientPhoneSearch, setClientPhoneSearch] = useState('')
-  const [selectedClient, setSelectedClient] = useState(null)
+  // ── Core data — starts EMPTY, populated only by filter ─────────────────
+  const [bookings, setBookings]       = useState([])       // displayed rows (filter results)
+  const [localRows, setLocalRows]     = useState([])       // excel rows pending sync
+  const [filterApplied, setFilterApplied] = useState(false)
+  const [filterLoading, setFilterLoading] = useState(false)
+
+  // ── Active filter values (shown as chips after search) ─────────────────
+  const [activeFilters, setActiveFilters] = useState({ clientName: '', dateFrom: '', dateTo: '' })
+
+  // ── Filter inputs ───────────────────────────────────────────────────────
+  const [filterClientName, setFilterClientName] = useState('')
+  const [filterClientId,   setFilterClientId]   = useState(null)   // ✅ send id not name
+  const [filterDateFrom,   setFilterDateFrom]   = useState('')
+  const [filterDateTo,     setFilterDateTo]     = useState('')
+  const [clientSuggestions, setClientSuggestions] = useState([])
+  const [showSuggestions,   setShowSuggestions]   = useState(false)
+
+  // ── Table UI state ──────────────────────────────────────────────────────
+  const [search,       setSearch]       = useState('')
+  const [sortOrder,    setSortOrder]    = useState('desc')
   const [selectedRows, setSelectedRows] = useState([])
-  const [isCreating, setIsCreating] = useState(false)
-  const [showNameDropdown, setShowNameDropdown] = useState(false)
+  const [uploading,    setUploading]    = useState(false)
+  const [saving,       setSaving]       = useState(false)
+
+  // ── Edit modal ──────────────────────────────────────────────────────────
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingRow,    setEditingRow]    = useState(null)
+  const [form,          setForm]          = useState({})
+
+  // ── Add booking modal ───────────────────────────────────────────────────
+  const [showAddModal,      setShowAddModal]      = useState(false)
+  const [date,              setDate]              = useState(new Date().toISOString().split('T')[0])
+  const [clients,           setClients]           = useState([])
+  const [clientSearch,      setClientSearch]      = useState('')
+  const [clientPhoneSearch, setClientPhoneSearch] = useState('')
+  const [selectedClient,    setSelectedClient]    = useState(null)
+  const [isCreating,        setIsCreating]        = useState(false)
+  const [showNameDropdown,  setShowNameDropdown]  = useState(false)
   const [showPhoneDropdown, setShowPhoneDropdown] = useState(false)
+  const [dragOver,          setDragOver]          = useState(false)
 
-  const [newRows, setNewRows] = useState([
-    {
-      DSR_CNNO: '',
-      DSR_REF_NO: '',
-      CHARGEABLE_WEIGHT: '',
-      RECEIVER_NAME: '',
-      RECEIVER_PIN: '',
-      CASH_AMOUNT: '',
-      UPI_ONLINE_AMOUNT: '',
-      CREDIT_AMOUNT: '',
-      TRANSACTION_REFNO: '',
-      PAYMENT_DATE: null,
-      TOTAL_AMOUNT: '',
-      REMARK : ''
+  const [newRows, setNewRows] = useState([{
+    DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '',
+    RECEIVER_NAME: '', RECEIVER_PIN: '', CASH_AMOUNT: '',
+    UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '', TRANSACTION_REFNO: '',
+    PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '',
+  }])
+
+  // ── Auth helper ─────────────────────────────────────────────────────────
+  const token = () => localStorage.getItem('access_token')
+
+  // ── Client autocomplete for filter bar ─────────────────────────────────
+  const fetchFilterSuggestions = useCallback(
+    debounce(async (val) => {
+      if (!val.trim()) { setClientSuggestions([]); setShowSuggestions(false); return }
+      try {
+        const res = await callApi({
+          url: `/api/searchClientsByName?name=${encodeURIComponent(val)}`,
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token()}` },
+        })
+        setClientSuggestions(res || [])
+        setShowSuggestions(true)
+      } catch { /* silent — don't block typing */ }
+    }, 350),
+    []
+  )
+
+  const handleFilterClientChange = (val) => {
+    setFilterClientName(val)
+    setFilterClientId(null)            // ✅ clear id if user edits the name manually
+    fetchFilterSuggestions(val)
+  }
+
+  const selectSuggestion = (client) => {
+    setFilterClientName(client.name)
+    setFilterClientId(client.id)      // ✅ store id for API call
+    setClientSuggestions([])
+    setShowSuggestions(false)
+  }
+
+  // ── FILTER → hit API ────────────────────────────────────────────────────
+  const handleFilter = async () => {
+    const hasClient = filterClientName.trim()
+    const hasDate   = filterDateFrom || filterDateTo
+
+    if (!hasClient && !hasDate) {
+      addToast('Please enter a client name or select a date range to search.', 'error')
+      return
     }
-  ])
-  // ── Fetch from API ──────────────────────────────────────────────────────
-  const fetchBookings = useCallback(async () => {
-    setLoading(true)
+
+    // ✅ If a name is typed but no suggestion was selected, we have no id — block it
+    if (hasClient && !filterClientId) {
+      addToast('Please select a client from the dropdown to ensure accuracy.', 'error')
+      return
+    }
+
+    setFilterLoading(true)
     try {
-      const token = localStorage.getItem('access_token')
+      const params = new URLSearchParams()
+      if (filterClientId)  params.append('client_id', filterClientId)   // ✅ id, not name
+      if (filterDateFrom)  params.append('date_from', filterDateFrom)
+      if (filterDateTo)    params.append('date_to',   filterDateTo)
+
       const data = await callApi({
-        url: API.list,
+        url: `${API.filter}?${params.toString()}`,
         method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token()}` },
       })
-      setBookings(Array.isArray(data) ? data : data.bookings ?? [])
-    } catch (err) {
-      addToast('Failed to load bookings.', 'error')
+
+      const rows = Array.isArray(data) ? data : (data.bookings ?? data.data ?? [])
+      setBookings(rows)
+      setFilterApplied(true)
+      setActiveFilters({
+        clientName: filterClientName.trim(),
+        dateFrom:   filterDateFrom,
+        dateTo:     filterDateTo,
+      })
+      setSelectedRows([])
+
+      if (rows.length === 0)
+        addToast('No bookings found for the given filter.', 'error')
+      else
+        addToast(`${rows.length} booking${rows.length !== 1 ? 's' : ''} found.`, 'success')
+    } catch {
+      addToast('Failed to fetch bookings. Please try again.', 'error')
     } finally {
-      setLoading(false)
+      setFilterLoading(false)
     }
-  }, [])
+  }
 
-  useEffect(() => { fetchBookings() }, [fetchBookings])
+  // ── Clear filter → back to empty state ─────────────────────────────────
+  const handleClearFilter = () => {
+    setFilterClientName('')
+    setFilterClientId(null)           // ✅ reset id too
+    setFilterDateFrom('')
+    setFilterDateTo('')
+    setBookings([])
+    setFilterApplied(false)
+    setActiveFilters({ clientName: '', dateFrom: '', dateTo: '' })
+    setClientSuggestions([])
+    setShowSuggestions(false)
+    setSelectedRows([])
+    setSearch('')
+  }
 
-  // ── Handle Excel file upload (frontend only, no API) ────────────────────
+  // ── Allow Enter key to trigger search ──────────────────────────────────
+  const handleFilterKeyDown = (e) => {
+    if (e.key === 'Enter') { setShowSuggestions(false); handleFilter() }
+  }
+
+  // ── Excel upload (frontend parse) ───────────────────────────────────────
   const handleFileUpload = async (file) => {
     if (!file) return
     const ext = file.name.split('.').pop().toLowerCase()
     if (!['xlsx', 'xls'].includes(ext)) {
-      addToast('Please upload a valid .xlsx or .xls file.', 'error')
-      return
+      addToast('Please upload a valid .xlsx or .xls file.', 'error'); return
     }
     setUploading(true)
     try {
       const rows = await parseXlsx(file)
       if (rows.length === 0) { addToast('File is empty.', 'error'); return }
 
-      // Merge into main bookings display (existing server rows take priority for id)
-      setBookings((prev) => {
-        const prevMap = new Map(prev.map((r) => [r.DSR_CNNO, r]))
-        rows.forEach((r) => prevMap.set(r.DSR_CNNO, r))
-        return Array.from(prevMap.values())
+      // Tag every row as local so the table can style it differently
+      const taggedRows = rows.map(r => ({ ...r, _isLocal: true }))
+
+      // Keep localRows in sync (used for syncing to server)
+      setLocalRows(prev => {
+        const m = new Map(prev.map(r => [r.DSR_CNNO, r]))
+        rows.forEach(r => m.set(r.DSR_CNNO, r))
+        return Array.from(m.values())
       })
 
-      // Track only new Excel rows separately (these have no id yet)
-      setLocalRows((prev) => {
-        const prevMap = new Map(prev.map((r) => [r.DSR_CNNO, r]))
-        rows.forEach((r) => prevMap.set(r.DSR_CNNO, r))
-        return Array.from(prevMap.values())
+      // ✅ Immediately show rows in the table by merging into bookings state.
+      // Server rows (from filter) take priority — local rows fill any gaps.
+      setBookings(prev => {
+        const m = new Map(prev.map(r => [r.DSR_CNNO, r]))
+        taggedRows.forEach(r => {
+          if (!m.has(r.DSR_CNNO)) m.set(r.DSR_CNNO, r)  // don't overwrite server rows
+        })
+        return Array.from(m.values())
       })
 
-      addToast(`Loaded ${rows.length} bookings from file.`, 'success')
+      addToast(`${rows.length} row${rows.length !== 1 ? 's' : ''} loaded — shown below. Click "Sync to Server" to save.`, 'success')
     } catch {
       addToast('Failed to parse file.', 'error')
     } finally {
@@ -293,117 +393,93 @@ export default function BookingsPage() {
     }
   }
 
-
-  const handleDelete = async (row) => {
-    if (!row.id) {
-      addToast('Cannot delete unsynced row', 'error')
-      return
+  // ── Sync excel rows to server ───────────────────────────────────────────
+  const handleUploadToServer = async () => {
+    if (localRows.length === 0) {
+      addToast('No pending Excel rows to sync.', 'error'); return
     }
-
-    if (!window.confirm(`Delete ${row.DSR_CNNO}?`)) return
-
+    setSaving(true)
     try {
-      const token = localStorage.getItem('access_token')
+      const response = await callApi({
+        url: '/api/bookingUpload',
+        method: 'POST',
+        body: { data: localRows },
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      const savedRows = Array.isArray(response) ? response : response.data ?? []
 
+      // Patch server-assigned ids + strip _isLocal flag so rows look normal
+      setBookings(prev => {
+        const byAwb = new Map(savedRows.map(r => [r.DSR_CNNO, r]))
+        return prev.map(r => {
+          if (byAwb.has(r.DSR_CNNO)) {
+            const { _isLocal, ...rest } = { ...r, ...byAwb.get(r.DSR_CNNO) }
+            return rest
+          }
+          return r
+        })
+      })
+
+      addToast(`${localRows.length} bookings synced!`, 'success')
+      setLocalRows([])
+    } catch {
+      addToast('Failed to sync bookings.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────
+  const handleDelete = async (row) => {
+    if (!row.id) { addToast('Cannot delete unsynced row', 'error'); return }
+    if (!window.confirm(`Delete booking ${row.DSR_CNNO}?`)) return
+    try {
       await callApi({
         url: API.delete,
         method: 'DELETE',
         body: { id: row.id },
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token()}` },
       })
-
       setBookings(prev => prev.filter(r => r.id !== row.id))
-      addToast('Deleted successfully', 'success')
+      addToast('Deleted successfully.', 'success')
     } catch {
-      addToast('Delete failed', 'error')
+      addToast('Delete failed.', 'error')
     }
   }
 
-  const toggleRowSelection = (id) => {
-    setSelectedRows(prev =>
-      prev.includes(id)
-        ? prev.filter(i => i !== id)
-        : [...prev, id]
-    )
-  }
+  // ── Selection ───────────────────────────────────────────────────────────
+  const toggleRowSelection = (id) =>
+    setSelectedRows(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
 
   const toggleSelectAll = () => {
     const ids = filtered.filter(r => r.id).map(r => r.id)
-
-    setSelectedRows(
-      selectedRows.length === ids.length ? [] : ids
-    )
+    setSelectedRows(selectedRows.length === ids.length ? [] : ids)
   }
 
+  // ── Invoice removed ────────────────────────────────────────────────────
 
-  const handleGenerateInvoice = async () => {
-    if (selectedRows.length === 0) {
-      addToast('Select at least one row', 'error')
-      return
-    }
-
-    try {
-      const token = localStorage.getItem('access_token')
-
-      await callApi({
-        url: API.invoice,
-        method: 'POST',
-        body: { booking_ids: selectedRows },
-        headers: { Authorization: `Bearer ${token}` },
-      })
-
-      addToast('Invoice generated', 'success')
-      setSelectedRows([])
-    } catch {
-      addToast('Failed to generate invoice', 'error')
-    }
-  }
-
-
-
-  // ── Edit helpers ────────────────────────────────────────────────────────
-  const openEdit = (row) => {
-    setEditingRow(row)
-    setForm({ ...row })
-    setShowEditModal(true)
-  }
-
-  const closeEdit = () => {
-    setShowEditModal(false)
-    setEditingRow(null)
-    setForm({})
-  }
+  // ── Edit ────────────────────────────────────────────────────────────────
+  const openEdit  = (row) => { setEditingRow(row); setForm({ ...row }); setShowEditModal(true) }
+  const closeEdit = () => { setShowEditModal(false); setEditingRow(null); setForm({}) }
 
   const handleSave = async () => {
     setSaving(true)
     try {
       if (editingRow.id) {
-        // ── Has id → came from server → hit API ──
-        const token = localStorage.getItem('access_token')
-        const data_to_update = {...form , "id" :editingRow.id}
+        // ✅ client_name is display-only (joined from clients table) — never send it to update API
+        const { client_name, _isLocal, ...cleanForm } = form
         const updated = await callApi({
           url: API.update,
           method: 'PUT',
-          body: {data : data_to_update},
-          headers: { Authorization: `Bearer ${token}` },
+          body: { data: { ...cleanForm, id: editingRow.id } },
+          headers: { Authorization: `Bearer ${token()}` },
         })
-        // setBookings((prev) =>
-        //   prev.map((r) => (r.id === editingRow.id ? { ...r, ...updated } : r))
-        // )
-        setBookings((prev) =>
-          prev.map((r) => (r.id === editingRow.id ? { ...r, ...updated.data } : r))
-        )
+        setBookings(prev => prev.map(r => r.id === editingRow.id ? { ...r, ...updated.data } : r))
         addToast(`Booking ${editingRow.DSR_CNNO} updated!`, 'success')
       } else {
-        // ── No id → came from Excel → update frontend only ──
-        setBookings((prev) =>
-          prev.map((r) => (r.DSR_CNNO === editingRow.DSR_CNNO ? { ...r, ...form } : r))
-        )
-        // Keep localRows in sync so the edited version gets sent on sync
-        setLocalRows((prev) =>
-          prev.map((r) => (r.DSR_CNNO === editingRow.DSR_CNNO ? { ...r, ...form } : r))
-        )
-        addToast(`Changes saved locally — sync to server to apply.`, 'success')
+        setBookings(prev => prev.map(r => r.DSR_CNNO === editingRow.DSR_CNNO ? { ...r, ...form } : r))
+        setLocalRows(prev => prev.map(r => r.DSR_CNNO === editingRow.DSR_CNNO ? { ...r, ...form } : r))
+        addToast('Saved locally — sync to server to apply.', 'success')
       }
       closeEdit()
     } catch {
@@ -413,268 +489,155 @@ export default function BookingsPage() {
     }
   }
 
-  // ── Sync Excel rows to server ───────────────────────────────────────────
-  const handleUploadToServer = async () => {
-    if (localRows.length === 0) {
-      addToast('No new Excel rows to upload — all data is already from the server.', 'error')
-      return
-    }
-    setSaving(true)
+  // ── Add booking helpers ─────────────────────────────────────────────────
+  const addNewRow    = () => setNewRows(p => [...p, {
+    DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '', RECEIVER_NAME: '',
+    RECEIVER_PIN: '', CASH_AMOUNT: '', UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '',
+    TRANSACTION_REFNO: '', PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '',
+  }])
+  const removeNewRow = (i) => setNewRows(p => p.filter((_, idx) => idx !== i))
+  const handleNewRowChange = (i, key, val) => {
+    setNewRows(p => { const u = [...p]; u[i][key] = val; return u })
+  }
+
+  const fetchClientsByName = async (val) => {
+    if (!val.trim()) { setClients([]); setShowNameDropdown(false); return }
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await callApi({
-        url: API.upload,
-        method: 'POST',
-        body: { data: localRows },
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await callApi({
+        url: `/api/searchClientsByName?name=${encodeURIComponent(val)}`,
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token()}` },
       })
-      // Server returns saved rows with ids — patch ids back into bookings state
-      const savedRows = Array.isArray(response) ? response : response.data ?? []
-      if (savedRows.length > 0) {
-        setBookings((prev) => {
-          const byAwb = new Map(savedRows.map((r) => [r.DSR_CNNO, r]))
-          return prev.map((r) => byAwb.has(r.DSR_CNNO) ? { ...r, ...byAwb.get(r.DSR_CNNO) } : r)
-        })
-      }
-      addToast(`${localRows.length} bookings synced to server!`, 'success')
-      setLocalRows([])
+      setClients(res || [])
+      setShowNameDropdown(true)
+    } catch { addToast('Failed to load clients', 'error') }
+  }
+
+  const fetchClientsByPhone = async (val) => {
+    if (!val.trim()) { setClients([]); setShowPhoneDropdown(false); return }
+    try {
+      const res = await callApi({
+        url: `/api/searchClientsByPhone?phone=${encodeURIComponent(val)}`,
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      setClients(res || [])
+      setShowPhoneDropdown(true)
+    } catch { addToast('Failed to load clients', 'error') }
+  }
+
+  const debouncedByName  = useCallback(debounce(fetchClientsByName,  400), [])
+  const debouncedByPhone = useCallback(debounce(fetchClientsByPhone, 400), [])
+
+  const handleSelectClient = (c) => {
+    setSelectedClient({ id: c.id, name: c.name, phone: c.phone })
+    setClientSearch(c.name); setClientPhoneSearch(c.phone)
+    setClients([]); setShowNameDropdown(false); setShowPhoneDropdown(false)
+  }
+
+  const handleCreateBooking = async () => {
+    if (isCreating)         return
+    if (!selectedClient)                      { addToast('Please select a client', 'error'); return }
+    if (newRows.some(r => !r.DSR_CNNO))       { addToast('Please add DSR CNNO', 'error'); return }
+    if (newRows.some(r => !r.DSR_REF_NO))     { addToast('Please add DSR REF No', 'error'); return }
+    if (newRows.some(r => !r.CHARGEABLE_WEIGHT)) { addToast('Please add chargeable weight', 'error'); return }
+    try {
+      setIsCreating(true)
+      await callApi({
+        url: API.addBooking,
+        method: 'POST',
+        body: { client_id: selectedClient.id, booking_date: date, bookings: newRows },
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      addToast('Bookings created successfully', 'success')
+      setShowAddModal(false)
+      setNewRows([{ DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '', RECEIVER_NAME: '',
+        RECEIVER_PIN: '', CASH_AMOUNT: '', UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '',
+        TRANSACTION_REFNO: '', PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '' }])
+      // Re-run last filter to reflect new data
+      if (filterApplied) handleFilter()
     } catch {
-      addToast('Failed to upload bookings to server.', 'error')
+      addToast('Failed to create booking', 'error')
     } finally {
-      setSaving(false)
+      setIsCreating(false)
     }
   }
 
-  // ── Filter / search ─────────────────────────────────────────────────────
-
-  const addNewRow = () => {
-  setNewRows([
-    ...newRows,
-    {
-      DSR_CNNO: '',
-      DSR_REF_NO: '',
-      CHARGEABLE_WEIGHT: '',
-      RECEIVER_NAME: '',
-      RECEIVER_PIN: '',
-      CASH_AMOUNT: '',
-      UPI_ONLINE_AMOUNT: '',
-      CREDIT_AMOUNT: '',
-      TRANSACTION_REFNO: '',
-      PAYMENT_DATE: null,
-      TOTAL_AMOUNT: '',
-      REMARK : ''
-    }
-  ])
-}
-
-const removeNewRow = (index) => {
-  setNewRows(newRows.filter((_, i) => i !== index))
-}
-
-const handleNewRowChange = (index, key, value) => {
-  const updated = [...newRows]
-  updated[index][key] = value
-  
-  setNewRows(updated)
-}
-
-
-
-const fetchClientsByName = async (value) => {
-  if (!value.trim()) {
-    setClients([])
-    setShowNameDropdown(false)
-    return
-  }
-
-  try {
-    const token = localStorage.getItem('access_token')
-    const res = await callApi({
-      url: `/api/searchClientsByName?name=${value}`,
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    console.log("API RESPONSE")
-    console.log(res)
-
-    setClients(res || [])
-    setShowNameDropdown(true)
-  } catch {
-    addToast('Failed to load clients', 'error')
-  }
-}
-
-const fetchClientsByPhone = async (value) => {
-  if (!value.trim()) {
-    setClients([])
-    setShowPhoneDropdown(false)
-    return
-  }
-
-  try {
-    const token = localStorage.getItem('access_token')
-    const res = await callApi({
-      url: `/api/searchClientsByPhone?phone=${value}`,
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-
-    setClients(res || [])
-    setShowPhoneDropdown(true)
-  } catch {
-    addToast('Failed to load clients', 'error')
-  }
-}
-
-const debouncedSearchByName = useCallback(
-  debounce((val) => fetchClientsByName(val), 500),
-  []
-)
-
-const debouncedSearchByPhone = useCallback(
-  debounce((val) => fetchClientsByPhone(val), 500),
-  []
-)
-
-
-const handleClientNameSearch = (value) => {
-  setClientSearch(value)
-  setSelectedClient(null)
-  setShowPhoneDropdown(false)
-  debouncedSearchByName(value)
-}
-
-const handleClientPhoneSearch = (value) => {
-  setClientPhoneSearch(value)
-  setSelectedClient(null)
-  setShowNameDropdown(false)
-  debouncedSearchByPhone(value)
-}
-
-
-const handleSelectClient = (client) => {
-  setSelectedClient({
-    id: client.id,
-    name: client.name,
-    phone: client.phone
-  })
-
-  setClientSearch(client.name)
-  setClientPhoneSearch(client.phone)
-
-  setClients([])
-  setShowNameDropdown(false)
-  setShowPhoneDropdown(false)
-}
-
-
-const handleCreateBooking = async () => {
-  if (isCreating) return
-  if (!selectedClient) {
-    addToast('Please select a client', 'error')
-    return
-  }
-
-  if (newRows.some(item => item.DSR_CNNO === "" || item.DSR_CNNO == null)) {
-    addToast('Please add DSR CCNO', 'error');
-    return;
-  }
-
-  if (newRows.some(item => item.DSR_REF_NO === "" || item.DSR_REF_NO == null)) {
-    addToast('Please add DSR REF No', 'error');
-    return;
-  }
-
-   if (newRows.some(item => item.CHARGEABLE_WEIGHT === "" || item.CHARGEABLE_WEIGHT == null)) {
-    addToast('Please add chargable weight', 'error');
-    return;
-  }
-
-  try {
-    setIsCreating(true) 
-    const token = localStorage.getItem('access_token')
-
-    const payload = {
-      client_id: selectedClient.id,
-      booking_date: date, 
-      bookings: newRows
-    }
-
-    await callApi({
-      url: '/api/addBooking',
-      method: 'POST',
-      body: payload,
-      headers: { Authorization: `Bearer ${token}` },
-    })
-
-    addToast('Bookings created successfully', 'success')
-    setShowAddModal(false)
-    setNewRows([])
-    fetchBookings()
-
-  } catch {
-    addToast('Failed to create booking', 'error')
-  }
-  finally{
-    setIsCreating(false)
-  }
-}
-
-
-const filtered = bookings
-  .filter((b) => {
-    const q = search.toLowerCase()
-    const matchSearch =
-      String(b.DSR_CNNO      ?? '').toLowerCase().includes(q) ||
-      String(b.DSR_CUST_CODE ?? '').toLowerCase().includes(q) ||
-      String(b.DSR_DEST      ?? '').toLowerCase().includes(q) ||
-      String(b.SENDER_NAME   ?? '').toLowerCase().includes(q) ||
-      String(b.RECEIVER_NAME ?? '').toLowerCase().includes(q)
-    const matchFilter = filter === 'All' || b.DSR_STATUS === filter
-    return matchSearch && matchFilter
-  })
-  .sort((a, b) => {
-    const parse = (d) => {
-      if (!d) return new Date(0)
-      const s = String(d)
-      // DD-MM-YYYY → reverse to YYYY-MM-DD
-      if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
-        const [dd, mm, yyyy] = s.split('-')
-        return new Date(`${yyyy}-${mm}-${dd}`)
-      }
-      // DD/MM/YYYY → reverse to YYYY-MM-DD
-      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-        const [dd, mm, yyyy] = s.split('/')
-        return new Date(`${yyyy}-${mm}-${dd}`)
-      }
-      // Already YYYY-MM-DD or ISO string — parse directly
-      return new Date(s)
-    }
-    const diff = parse(a.DSR_BOOKING_DATE) - parse(b.DSR_BOOKING_DATE)
-    return sortOrder === 'desc' ? -diff : diff
-  })
-
-  // ── Summary counts ──────────────────────────────────────────────────────
-  const counts = {
-    total:     bookings.length,
-    inTransit: bookings.filter(b => b.DSR_STATUS === 'In Transit').length,
-    delivered: bookings.filter(b => b.DSR_STATUS === 'Delivered').length,
-    booked:    bookings.filter(b => b.DSR_STATUS === 'Booked' || b.DSR_STATUS === 'B').length,
-    cancelled: bookings.filter(b => b.DSR_STATUS === 'Cancelled').length,
-  }
-
-  // ── Export visible rows ─────────────────────────────────────────────────
+  // ── Export selected rows (or all filtered if nothing selected) ────────────
   const handleExport = () => {
-    if (filtered.length === 0) { addToast('Nothing to export.', 'error'); return }
-    const ws = XLSX.utils.json_to_sheet(filtered)
+    // Decide which rows to export
+    const rowsToExport = selectedRows.length > 0
+      ? filtered.filter(r => r.id && selectedRows.includes(r.id))
+      : filtered
+
+    if (rowsToExport.length === 0) { addToast('Nothing to export.', 'error'); return }
+
+    // Build clean export rows: client_name first, strip internal flags
+    const exportData = rowsToExport.map(r => {
+      const { _isLocal, ...rest } = r
+      // Put client_name at the very front for readability
+      const { client_name, ...others } = rest
+      return { CLIENT_NAME: client_name ?? '', ...others }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Bookings')
     XLSX.writeFile(wb, `Bookings_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    addToast(`Exported ${filtered.length} bookings.`, 'success')
+    addToast(
+      selectedRows.length > 0
+        ? `Exported ${rowsToExport.length} selected booking${rowsToExport.length !== 1 ? 's' : ''}.`
+        : `Exported all ${rowsToExport.length} filtered bookings.`,
+      'success'
+    )
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  console.log('clients:', clients, 'showName:', showNameDropdown)
+  // ── Client-side search + sort ───────────────────────────────────────────
+  // bookings holds BOTH server rows (filter results) AND local Excel rows (_isLocal:true).
+  // Local rows are always visible; server rows only appear after a filter is applied.
+  const filtered = bookings
+    .filter(b => {
+      const q = search.toLowerCase()
+      return (
+        String(b.DSR_CNNO      ?? '').toLowerCase().includes(q) ||
+        String(b.client_name   ?? '').toLowerCase().includes(q) ||
+        String(b.DSR_DEST      ?? '').toLowerCase().includes(q) ||
+        String(b.RECEIVER_NAME ?? '').toLowerCase().includes(q) ||
+        String(b.SENDER_NAME   ?? '').toLowerCase().includes(q)
+      )
+    })
+    .sort((a, b) => {
+      // Unsynced local rows always float to the top
+      if (a._isLocal && !b._isLocal) return -1
+      if (!a._isLocal && b._isLocal) return  1
+      const parse = (d) => {
+        if (!d) return new Date(0)
+        const s = String(d)
+        if (/^\d{2}-\d{2}-\d{4}$/.test(s)) { const [dd,mm,yyyy]=s.split('-'); return new Date(`${yyyy}-${mm}-${dd}`) }
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ const [dd,mm,yyyy]=s.split('/'); return new Date(`${yyyy}-${mm}-${dd}`) }
+        return new Date(s)
+      }
+      const diff = parse(a.DSR_BOOKING_DATE) - parse(b.DSR_BOOKING_DATE)
+      return sortOrder === 'desc' ? -diff : diff
+    })
+
+  // Table is visible when there are local rows OR a filter has been applied
+  const tableHasData = filterApplied || localRows.length > 0
+
+  // ── Shared styles ───────────────────────────────────────────────────────
+  const thStyle = {
+    padding: '11px 16px', textAlign: 'left',
+    color: COLORS.gray, fontWeight: 600, whiteSpace: 'nowrap', fontSize: 12,
+  }
+  const inputBaseStyle = {
+    width: '100%', padding: '9px 12px', fontSize: 13, boxSizing: 'border-box',
+    border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.md,
+    outline: 'none', fontFamily: "'DM Sans', sans-serif", color: COLORS.dark,
+  }
+  const labelStyle = {
+    fontSize: 12, fontWeight: 600, color: COLORS.gray, display: 'block', marginBottom: 5,
+  }
+
   return (
     <DashboardLayout>
 
@@ -685,46 +648,27 @@ const filtered = bookings
             Consignment Bookings
           </h2>
           <p style={{ fontSize: 13, color: COLORS.gray, marginTop: 2 }}>
-            {loading ? 'Loading…' : `${bookings.length} total bookings — ${counts.inTransit} in transit`}
+            {filterApplied
+              ? `${bookings.length} booking${bookings.length !== 1 ? 's' : ''} found`
+              : 'Use the filter below to search bookings'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Hidden file input */}
-          <Button
-            icon="🧾"
-            onClick={handleGenerateInvoice}
-            disabled={selectedRows.length === 0}
-          >
-            Generate Invoice ({selectedRows.length})
-          </Button>
-
-          <Button onClick={() => setShowAddModal(true)}>
-            + Add booking
-          </Button>
+          <Button onClick={() => setShowAddModal(true)}>+ Add Booking</Button>
           <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
+            ref={fileInputRef} type="file" accept=".xlsx,.xls"
             style={{ display: 'none' }}
             onChange={(e) => handleFileUpload(e.target.files[0])}
           />
-          <Button
-            variant="outline"
-            icon="📂"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
+          <Button variant="outline" icon="📂" size="sm"
+            onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             {uploading ? 'Reading…' : 'Upload Excel'}
           </Button>
-          <Button variant="outline" icon="📤" size="sm" onClick={handleExport}>
-            Export Excel
+          <Button variant="outline" icon="📤" size="sm" onClick={handleExport}
+            disabled={!tableHasData || filtered.length === 0}>
+            {selectedRows.length > 0 ? `Export Selected (${selectedRows.length})` : 'Export Excel'}
           </Button>
-          <Button
-            icon="☁️"
-            onClick={handleUploadToServer}
-            disabled={saving || localRows.length === 0}
-          >
+          <Button icon="☁️" onClick={handleUploadToServer} disabled={saving || localRows.length === 0}>
             {saving ? 'Uploading…' : `Sync to Server (${localRows.length})`}
           </Button>
         </div>
@@ -734,28 +678,23 @@ const filtered = bookings
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault(); setDragOver(false)
-          handleFileUpload(e.dataTransfer.files[0])
-        }}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFileUpload(e.dataTransfer.files[0]) }}
+        onClick={() => fileInputRef.current?.click()}
         style={{
           border: `2px dashed ${dragOver ? COLORS.primary : COLORS.border}`,
-          borderRadius: RADIUS.lg,
-          padding: '18px 24px',
-          marginBottom: 18,
+          borderRadius: RADIUS.lg, padding: '16px 24px', marginBottom: 18,
           background: dragOver ? COLORS.primary + '08' : COLORS.white,
           display: 'flex', alignItems: 'center', gap: 14,
           cursor: 'pointer', transition: 'all 0.2s',
         }}
-        onClick={() => fileInputRef.current?.click()}
       >
-        <span style={{ fontSize: 28 }}>📊</span>
+        <span style={{ fontSize: 26 }}>📊</span>
         <div>
           <div style={{ fontWeight: 600, fontSize: 14, color: COLORS.dark }}>
             Drop your DSR Excel file here, or click to browse
           </div>
-          <div style={{ fontSize: 12, color: COLORS.gray, marginTop: 3 }}>
-            Supports .xlsx and .xls · All {EDIT_SECTIONS.reduce((a, s) => a + s.fields.length, 0)} fields supported · Duplicate AWBs merged automatically
+          <div style={{ fontSize: 12, color: COLORS.gray, marginTop: 2 }}>
+            Supports .xlsx and .xls · Duplicate AWBs merged automatically
           </div>
         </div>
         {localRows.length > 0 && (
@@ -770,135 +709,268 @@ const filtered = bookings
         )}
       </div>
 
-      
-
-      {/* ── Table card ── */}
-      <div style={{ background: COLORS.white, borderRadius: RADIUS.lg, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
-
-        {/* Toolbar */}
-        <div style={{
-          padding: '14px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
-          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-        }}>
-          <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }}>🔍</span>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search AWB, customer, destination, sender…"
+      {/* ── Filter Panel ── */}
+      <div style={{
+        background: COLORS.white, border: `1px solid ${COLORS.border}`,
+        borderRadius: RADIUS.lg, padding: '20px 22px', marginBottom: 20,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: COLORS.dark, margin: 0 }}>
+            🔎 Search Bookings
+          </h3>
+          {filterApplied && (
+            <button
+              onClick={handleClearFilter}
               style={{
-                width: '100%', padding: '9px 12px 9px 34px', fontSize: 14,
-                border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.md,
-                outline: 'none', fontFamily: "'DM Sans', sans-serif", color: COLORS.dark,
+                fontSize: 12, color: COLORS.danger, background: 'none',
+                border: `1px solid ${COLORS.danger}20`, borderRadius: RADIUS.full,
+                padding: '4px 12px', cursor: 'pointer', fontWeight: 600,
               }}
-              onFocus={e => e.target.style.borderColor = COLORS.primary}
-              onBlur={e  => e.target.style.borderColor = COLORS.border}
-            />
-          </div>
-          
-                    {/* Sort by date */}
-          <button
-            onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}
-            style={{
-              padding: '6px 14px', borderRadius: RADIUS.full, fontSize: 13,
-              fontWeight: 500, cursor: 'pointer',
-              border: `1.5px solid ${COLORS.border}`,
-              background: 'transparent', color: COLORS.gray,
-              transition: 'all 0.15s', fontFamily: "'DM Sans', sans-serif",
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = COLORS.primary}
-            onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.border}
-          >
-            {sortOrder === 'desc' ? '↓' : '↑'} Date
-          </button>
+            >
+              ✕ Clear &amp; Reset
+            </button>
+          )}
         </div>
 
-        {/* Table */}
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+
+          {/* Client Name autocomplete */}
+          <div style={{ position: 'relative', flex: '2 1 240px', minWidth: 220 }}>
+            <label style={labelStyle}>Client Name</label>
+            <input
+              value={filterClientName}
+              onChange={(e) => handleFilterClientChange(e.target.value)}
+              onKeyDown={handleFilterKeyDown}
+              onFocus={() => clientSuggestions.length > 0 && setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 180)}
+              placeholder="Type client name to search…"
+              style={inputBaseStyle}
+            />
+            {showSuggestions && clientSuggestions.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999,
+                background: '#fff', border: `1px solid ${COLORS.border}`,
+                borderRadius: RADIUS.md, maxHeight: 200, overflowY: 'auto',
+                boxShadow: '0 6px 16px rgba(0,0,0,0.1)', marginTop: 4,
+              }}>
+                {clientSuggestions.map((c, i) => (
+                  <div
+                    key={i}
+                    onMouseDown={() => selectSuggestion(c)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      display: 'flex', justifyContent: 'space-between',
+                      borderBottom: i < clientSuggestions.length - 1 ? `1px solid ${COLORS.grayLight}` : 'none',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = COLORS.bgPage}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                  >
+                    <span style={{ fontWeight: 600, color: COLORS.dark }}>{c.name}</span>
+                    <span style={{ color: COLORS.gray, fontSize: 12 }}>{c.phone}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Date From */}
+          <div style={{ flex: '1 1 160px', minWidth: 150 }}>
+            <label style={labelStyle}>Date From</label>
+            <input
+              type="date" value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+              onKeyDown={handleFilterKeyDown}
+              style={inputBaseStyle}
+            />
+          </div>
+
+          {/* Date To */}
+          <div style={{ flex: '1 1 160px', minWidth: 150 }}>
+            <label style={labelStyle}>Date To</label>
+            <input
+              type="date" value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+              onKeyDown={handleFilterKeyDown}
+              style={inputBaseStyle}
+            />
+          </div>
+
+          {/* Search button */}
+          <div style={{ paddingBottom: 1 }}>
+            <Button onClick={handleFilter} disabled={filterLoading}>
+              {filterLoading ? 'Searching…' : '🔍 Search'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Active filter chips */}
+        {filterApplied && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+            {activeFilters.clientName && (
+              <span style={{
+                background: COLORS.primary + '15', color: COLORS.primary,
+                border: `1px solid ${COLORS.primary}30`,
+                borderRadius: RADIUS.full, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+              }}>
+                👤 {activeFilters.clientName}
+              </span>
+            )}
+            {(activeFilters.dateFrom || activeFilters.dateTo) && (
+              <span style={{
+                background: COLORS.success + '15', color: COLORS.success,
+                border: `1px solid ${COLORS.success}30`,
+                borderRadius: RADIUS.full, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+              }}>
+                📅 {activeFilters.dateFrom || '…'} → {activeFilters.dateTo || '…'}
+              </span>
+            )}
+            <span style={{
+              background: COLORS.grayLight, color: COLORS.gray,
+              borderRadius: RADIUS.full, padding: '4px 12px', fontSize: 12,
+            }}>
+              {bookings.length} result{bookings.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Bookings Table ── */}
+      <div style={{
+        background: COLORS.white, borderRadius: RADIUS.lg,
+        border: `1px solid ${COLORS.border}`, overflow: 'hidden',
+      }}>
+
+        {/* Table toolbar — shown when local rows exist OR filter applied */}
+        {tableHasData && bookings.length > 0 && (
+          <div style={{
+            padding: '14px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+          }}>
+            <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14 }}>🔍</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Narrow results by AWB, receiver, destination…"
+                style={{
+                  width: '100%', padding: '8px 12px 8px 32px', fontSize: 13,
+                  border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.md,
+                  outline: 'none', fontFamily: "'DM Sans', sans-serif", color: COLORS.dark,
+                }}
+                onFocus={e => e.target.style.borderColor = COLORS.primary}
+                onBlur={e  => e.target.style.borderColor = COLORS.border}
+              />
+            </div>
+            <button
+              onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}
+              style={{
+                padding: '6px 14px', borderRadius: RADIUS.full, fontSize: 13, fontWeight: 500,
+                cursor: 'pointer', border: `1.5px solid ${COLORS.border}`,
+                background: 'transparent', color: COLORS.gray, transition: 'all 0.15s',
+                fontFamily: "'DM Sans', sans-serif", display: 'flex', alignItems: 'center', gap: 6,
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = COLORS.primary}
+              onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.border}
+            >
+              {sortOrder === 'desc' ? '↓' : '↑'} Date
+            </button>
+          </div>
+        )}
+
+        {/* Table body */}
         <div style={{ overflowX: 'auto' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '60px 20px', color: COLORS.gray }}>Loading bookings…</div>
+          {filterLoading ? (
+            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
+              <div style={{ color: COLORS.gray, fontSize: 14 }}>Searching bookings…</div>
+            </div>
+
+          ) : !tableHasData ? (
+            /* ── Empty state — nothing uploaded, no filter yet ── */
+            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>📦</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: COLORS.dark, marginBottom: 8 }}>
+                No bookings displayed yet
+              </div>
+              <div style={{ fontSize: 13, color: COLORS.gray, maxWidth: 380, margin: '0 auto' }}>
+                Use the filter above to search by <strong>client name</strong> or <strong>date range</strong>,
+                or <strong>upload an Excel file</strong> — rows will appear here instantly.
+              </div>
+            </div>
+
           ) : filtered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: COLORS.gray }}>
               {bookings.length === 0
-                ? 'No bookings yet — upload an Excel file or wait for API data.'
-                : 'No bookings match your search.'}
+                ? 'No bookings match the selected filter.'
+                : 'No results match your search term.'}
             </div>
+
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                {/* <tr style={{ background: COLORS.bgPage }}>
-                  {[...TABLE_COLS.map(c => c.label), 'Action'].map(h => (
-                    <th key={h} style={{
-                      padding: '11px 16px', textAlign: 'left',
-                      color: COLORS.gray, fontWeight: 600, whiteSpace: 'nowrap', fontSize: 12,
-                    }}>{h}</th>
-                  ))}
-                </tr> */}
                 <tr style={{ background: COLORS.bgPage }}>
                   <th style={{ padding: '11px 16px' }}>
                     <input
                       type="checkbox"
-                      checked={
-                        selectedRows.length > 0 &&
-                        selectedRows.length === filtered.filter(r => r.id).length
-                      }
+                      checked={selectedRows.length > 0 && selectedRows.length === filtered.filter(r => r.id).length}
                       onChange={toggleSelectAll}
                     />
                   </th>
-
-                  {[...TABLE_COLS.map(c => c.label), 'Action'].map(h => (
-                    <th key={h} style={{
-                      padding: '11px 16px',
-                      textAlign: 'left',
-                      color: COLORS.gray,
-                      fontWeight: 600,
-                      whiteSpace: 'nowrap',
-                      fontSize: 12,
-                    }}>
-                      {h}
-                    </th>
-                  ))}
+                  {TABLE_COLS.map(c => <th key={c.key} style={thStyle}>{c.label}</th>)}
+                  <th style={thStyle}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((b, i) => (
-                  <tr key={b.id ?? b.DSR_CNNO ?? i}>
-                    {/* Checkbox */}
+                  <tr key={b.id ?? b.DSR_CNNO ?? i}
+                    style={{
+                      borderTop: `1px solid ${COLORS.grayLight}`,
+                      // ✅ Yellow tint for unsynced local rows, normal zebra otherwise
+                      background: b._isLocal
+                        ? '#fffbea'
+                        : i % 2 === 0 ? '#fff' : COLORS.bgPage + '50',
+                    }}
+                  >
                     <td style={{ padding: '12px 16px' }}>
                       {b.id && (
-                        <input
-                          type="checkbox"
+                        <input type="checkbox"
                           checked={selectedRows.includes(b.id)}
                           onChange={() => toggleRowSelection(b.id)}
                         />
                       )}
                     </td>
-
-                    {TABLE_COLS.map(({ key }) => (
-                      <td key={key} style={{
-                        padding: '12px 16px',
-                        whiteSpace: 'nowrap'
+                    {TABLE_COLS.map(col => (
+                      <td key={col.key} style={{
+                        padding: '12px 16px', whiteSpace: 'nowrap',
+                        fontWeight: col.key === 'client_name' ? 600 : 400,
+                        color: col.key === 'client_name' ? COLORS.primary : COLORS.dark,
                       }}>
-                        {key === 'DSR_STATUS' ? (
-                          <StatusBadge status={b[key] || '—'} />
-                        ) : key === 'DSR_AMT' || key === 'TOTAL_AMOUNT' ? (
-                          b[key] ? `₹${Number(b[key]).toLocaleString()}` : '—'
+                        {/* ✅ First column of local rows shows a pending badge */}
+                        {col.key === 'client_name' && b._isLocal ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                          }}>
+                            <span style={{
+                              background: COLORS.warning + '25',
+                              color: COLORS.warning,
+                              border: `1px solid ${COLORS.warning}50`,
+                              borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 700,
+                            }}>
+                              ⏳ PENDING
+                            </span>
+                          </span>
                         ) : (
-                          b[key] || '—'
+                          <CellValue col={col} row={b} />
                         )}
                       </td>
                     ))}
-
-                    <td style={{ padding: '12px 16px', display: 'flex', gap: 8 }}>
-                      <button onClick={() => openEdit(b)}>✏️</button>
-
-                      <button
-                        onClick={() => handleDelete(b)}
-                        style={{ color: COLORS.danger }}
-                      >
-                        🗑
-                      </button>
+                    <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => openEdit(b)} style={{ marginRight: 8 }} title="Edit">✏️</button>
+                      {/* ✅ Delete only available for synced rows */}
+                      {b.id
+                        ? <button onClick={() => handleDelete(b)} style={{ color: COLORS.danger }} title="Delete">🗑</button>
+                        : <span title="Sync to server first" style={{ opacity: 0.3, cursor: 'not-allowed', fontSize: 16 }}>🗑</span>
+                      }
                     </td>
                   </tr>
                 ))}
@@ -909,10 +981,14 @@ const filtered = bookings
 
         {/* Footer */}
         <div style={{
-          padding: '14px 20px', borderTop: `1px solid ${COLORS.grayLight}`,
+          padding: '12px 20px', borderTop: `1px solid ${COLORS.grayLight}`,
           fontSize: 13, color: COLORS.gray, display: 'flex', justifyContent: 'space-between',
         }}>
-          <span>Showing {filtered.length} of {bookings.length} records</span>
+          <span>
+            {tableHasData
+              ? `Showing ${filtered.length} record${filtered.length !== 1 ? 's' : ''}${filterApplied ? ` — ${bookings.filter(r => !r._isLocal).length} from server` + (localRows.length > 0 ? `, ${localRows.length} local` : '') : ''}`
+              : 'Apply a filter or upload an Excel file to load bookings'}
+          </span>
           {localRows.length > 0 && (
             <span style={{ color: COLORS.warning, fontWeight: 600 }}>
               ⚠️ {localRows.length} local row{localRows.length > 1 ? 's' : ''} pending sync
@@ -925,11 +1001,9 @@ const filtered = bookings
       <Modal
         isOpen={showEditModal}
         onClose={closeEdit}
-        title={
-          editingRow?.id
-            ? `Edit Booking — ${editingRow?.DSR_CNNO || ''}`
-            : `Edit Booking (Local) — ${editingRow?.DSR_CNNO || ''}`
-        }
+        title={editingRow?.id
+          ? `Edit Booking — ${editingRow?.DSR_CNNO || ''}`
+          : `Edit Booking (Local) — ${editingRow?.DSR_CNNO || ''}`}
         size="lg"
         footer={
           <>
@@ -940,19 +1014,30 @@ const filtered = bookings
           </>
         }
       >
-        {/* Banner for local-only rows */}
+        {/* ✅ Always show client name as read-only info banner */}
+        {editingRow?.client_name && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: COLORS.primary + '0d', border: `1px solid ${COLORS.primary}25`,
+            borderRadius: RADIUS.md, padding: '10px 16px', marginBottom: 20,
+            fontSize: 13,
+          }}>
+            <span style={{ fontSize: 16 }}>👤</span>
+            <span style={{ color: COLORS.gray }}>Client:</span>
+            <span style={{ fontWeight: 700, color: COLORS.primary }}>{editingRow.client_name}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: COLORS.gray, fontStyle: 'italic' }}>
+              read-only — managed via Clients
+            </span>
+          </div>
+        )}
+
         {!editingRow?.id && (
           <div style={{
-            background: COLORS.warning + '15',
-            border: `1px solid ${COLORS.warning}`,
-            borderRadius: RADIUS.md,
-            padding: '10px 14px',
-            marginBottom: 20,
-            fontSize: 13,
-            color: COLORS.warning,
-            fontWeight: 500,
+            background: COLORS.warning + '15', border: `1px solid ${COLORS.warning}`,
+            borderRadius: RADIUS.md, padding: '10px 14px', marginBottom: 20,
+            fontSize: 13, color: COLORS.warning, fontWeight: 500,
           }}>
-            ⚠️ This booking is not yet synced to the server. Changes will be saved locally and sent when you click "Sync to Server".
+            ⚠️ This booking is not yet synced to the server. Changes will be saved locally.
           </div>
         )}
         {EDIT_SECTIONS.map((section) => (
@@ -962,9 +1047,7 @@ const filtered = bookings
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
               {section.fields.map(({ key, label }) => (
-                <Input
-                  key={key}
-                  label={label}
+                <Input key={key} label={label}
                   value={form[key] ?? ''}
                   onChange={(e) => setForm(p => ({ ...p, [key]: e.target.value }))}
                   placeholder={label}
@@ -975,6 +1058,7 @@ const filtered = bookings
         ))}
       </Modal>
 
+      {/* ── Add Booking Modal ── */}
       <Modal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -982,57 +1066,30 @@ const filtered = bookings
         size="full"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setShowAddModal(false)}>
-              Cancel
-            </Button>
+            <Button variant="ghost" onClick={() => setShowAddModal(false)}>Cancel</Button>
             <Button onClick={handleCreateBooking} disabled={isCreating}>
               {isCreating ? 'Submitting...' : 'Submit'}
             </Button>
           </>
         }
       >
-        {/* Client Search */}
-        
-        {/* Client Search + Date in one row */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
-
           {/* Search by Name */}
           <div style={{ position: 'relative', width: 250 }}>
-            <Input
-              label="Client Name"
-              value={clientSearch}
-              onChange={(e) => handleClientNameSearch(e.target.value)}
+            <Input label="Client Name" value={clientSearch}
+              onChange={(e) => { setClientSearch(e.target.value); setSelectedClient(null); setShowPhoneDropdown(false); debouncedByName(e.target.value) }}
               onFocus={() => clients.length > 0 && setShowNameDropdown(true)}
             />
-
             {showNameDropdown && clients.length > 0 && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  background: '#fff',
-                  border: '1px solid #ddd',
-                  borderRadius: 6,
-                  zIndex: 9999,
-                  maxHeight: 200,
-                  overflowY: 'auto'
-                }}
-              >
-                {clients.map((client, i) => (
-                  <div
-                    key={i}
-                    onClick={() => handleSelectClient(client)}
-                    style={{
-                      padding: '8px 10px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <span>{client.name}</span>
-                    <span>{client.phone}</span>
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0,
+                background: '#fff', border: '1px solid #ddd', borderRadius: 6,
+                zIndex: 9999, maxHeight: 200, overflowY: 'auto',
+              }}>
+                {clients.map((c, i) => (
+                  <div key={i} onClick={() => handleSelectClient(c)}
+                    style={{ padding: '8px 10px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{c.name}</span><span>{c.phone}</span>
                   </div>
                 ))}
               </div>
@@ -1041,68 +1098,39 @@ const filtered = bookings
 
           {/* Search by Phone */}
           <div style={{ flex: 1, position: 'relative' }}>
-            <Input
-              label="Search Client Phone"
-              value={clientPhoneSearch}
-              onChange={(e) => handleClientPhoneSearch(e.target.value)}
-              // onFocus={() => clients.length > 0 && setShowPhoneDropdown(true)}
+            <Input label="Search Client Phone" value={clientPhoneSearch}
+              onChange={(e) => { setClientPhoneSearch(e.target.value); setSelectedClient(null); setShowNameDropdown(false); debouncedByPhone(e.target.value) }}
             />
-
             {showPhoneDropdown && clients.length > 0 && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  background: '#fff',
-                  border: `1px solid ${COLORS.grayLight}`,
-                  borderRadius: 6,
-                  zIndex: 9999,
-                  maxHeight: 200,
-                  overflowY: 'auto'
-                }}
-              >
-                {clients.map((client, i) => (
-                  <div
-                    key={i}
-                    onClick={() => handleSelectClient(client)}
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0,
+                background: '#fff', border: `1px solid ${COLORS.grayLight}`,
+                borderRadius: 6, zIndex: 9999, maxHeight: 200, overflowY: 'auto',
+              }}>
+                {clients.map((c, i) => (
+                  <div key={i} onClick={() => handleSelectClient(c)}
                     style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      borderBottom: `1px solid ${COLORS.grayLight}`,
-                      background: '#fff'
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      display: 'flex', justifyContent: 'space-between',
+                      borderBottom: `1px solid ${COLORS.grayLight}`, background: '#fff',
                     }}
                     onMouseEnter={e => e.currentTarget.style.background = COLORS.bgPage}
                     onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                   >
-                    <span style={{ fontWeight: 600, color: COLORS.dark }}>
-                      {client.name}
-                    </span>
-                    <span style={{ color: COLORS.gray }}>
-                      {client.phone}
-                    </span>
+                    <span style={{ fontWeight: 600, color: COLORS.dark }}>{c.name}</span>
+                    <span style={{ color: COLORS.gray }}>{c.phone}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          {/* Date */}
-          <div style={{ flex: 1 }}>
-            <Input
-              label="Input Date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </div>
 
+          <div style={{ flex: 1 }}>
+            <Input label="Booking Date" type="date" value={date}
+              onChange={(e) => setDate(e.target.value)} />
+          </div>
         </div>
 
-        {/* Selected Client Badge */}
         {selectedClient && (
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1112,160 +1140,37 @@ const filtered = bookings
             <span>✅</span>
             <span style={{ fontWeight: 600, color: COLORS.dark }}>{selectedClient.name}</span>
             <span style={{ color: COLORS.gray }}>{selectedClient.phone}</span>
-            <span
-              onClick={() => { setSelectedClient(null); setClientSearch(''); setClientPhoneSearch('') }}
-              style={{ cursor: 'pointer', color: COLORS.danger, fontWeight: 700, marginLeft: 4 }}
-            >✕</span>
+            <span onClick={() => { setSelectedClient(null); setClientSearch(''); setClientPhoneSearch('') }}
+              style={{ cursor: 'pointer', color: COLORS.danger, fontWeight: 700, marginLeft: 4 }}>✕</span>
           </div>
         )}
 
-        {/* Rows */}
         {newRows.map((row, index) => (
-          <div
-            key={index}
-            style={{
-              display: 'flex',
-              gap: 10,
-              alignItems: 'center',
-              marginBottom: 10,
-              padding: 10,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 8,
-              overflowX: 'auto'
-            }}
-          >
-            <Input
-              label="DSR CNNO"
-              required
-              value={row.DSR_CNNO}
-              onChange={(e) =>
-                handleNewRowChange(index, 'DSR_CNNO', e.target.value)
-              }
-              style={{ minWidth: 140 }}
-            />
-
-            <Input
-              label="DSR REF NO"
-              required
-              value={row.DSR_REF_NO}
-              onChange={(e) =>
-                handleNewRowChange(index, 'DSR_REF_NO', e.target.value)
-              }
-              style={{ minWidth: 140 }}
-            />
-
-            <Input
-              label="Chargable Weight"
-              required
-              value={row.CHARGEABLE_WEIGHT}
-              onChange={(e) =>
-                handleNewRowChange(index, 'CHARGEABLE_WEIGHT', e.target.value)
-              }
-              style={{ minWidth: 140 }}
-            />
-
-            <Input
-              label="Receiver name"
-              value={row.RECEIVER_NAME}
-              onChange={(e) =>
-                handleNewRowChange(index, 'RECEIVER_NAME', e.target.value)
-              }
-              style={{ minWidth: 120 }}
-            />
-
-            <Input
-              label="Receiver pin"
-              value={row.RECEIVER_PIN}
-              onChange={(e) =>
-                handleNewRowChange(index, 'RECEIVER_PIN', e.target.value)
-              }
-              style={{ minWidth: 100 }}
-            />
-
-            <Input
-              label="Cash amount"
-              value={row.CASH_AMOUNT}
-              onChange={(e) =>
-                handleNewRowChange(index, 'CASH_AMOUNT', e.target.value)
-              }
-              style={{ minWidth: 100 }}
-            />
-
-            <Input
-              label="Online amount"
-              value={row.UPI_ONLINE_AMOUNT}
-              onChange={(e) =>
-                handleNewRowChange(index, 'UPI_ONLINE_AMOUNT', e.target.value)
-              }
-              style={{ minWidth: 100 }}
-            />
-
-
-            <Input
-              label="Credit amount"
-              value={row.CREDIT_AMOUNT}
-              onChange={(e) =>
-                handleNewRowChange(index, 'CREDIT_AMOUNT', e.target.value)
-              }
-              style={{ minWidth: 100 }}
-            />
-
-
-            <Input
-              label="Transaction ref no"
-              value={row.TRANSACTION_REFNO}
-              onChange={(e) =>
-                handleNewRowChange(index, 'TRANSACTION_REFNO', e.target.value)
-              }
-              style={{ minWidth: 180 }}
-              labelStyle={{ whiteSpace: 'nowrap' }}
-            />
-
-            <Input
-              label="Total"
-              value={row.TOTAL_AMOUNT}
-              onChange={(e) =>
-                handleNewRowChange(index, 'TOTAL_AMOUNT', e.target.value)
-              }
-              style={{ minWidth: 100 }}
-            />
-
-
-            <Input
-              label = "Payment date"
-              type = "date"
+          <div key={index} style={{
+            display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10,
+            padding: 10, border: `1px solid ${COLORS.border}`, borderRadius: 8, overflowX: 'auto',
+          }}>
+            <Input label="DSR CNNO" required value={row.DSR_CNNO} onChange={(e) => handleNewRowChange(index, 'DSR_CNNO', e.target.value)} style={{ minWidth: 140 }} />
+            <Input label="DSR REF NO" required value={row.DSR_REF_NO} onChange={(e) => handleNewRowChange(index, 'DSR_REF_NO', e.target.value)} style={{ minWidth: 140 }} />
+            <Input label="Chargeable Weight" required value={row.CHARGEABLE_WEIGHT} onChange={(e) => handleNewRowChange(index, 'CHARGEABLE_WEIGHT', e.target.value)} style={{ minWidth: 140 }} />
+            <Input label="Receiver Name" value={row.RECEIVER_NAME} onChange={(e) => handleNewRowChange(index, 'RECEIVER_NAME', e.target.value)} style={{ minWidth: 120 }} />
+            <Input label="Receiver Pin" value={row.RECEIVER_PIN} onChange={(e) => handleNewRowChange(index, 'RECEIVER_PIN', e.target.value)} style={{ minWidth: 100 }} />
+            <Input label="Cash Amount" value={row.CASH_AMOUNT} onChange={(e) => handleNewRowChange(index, 'CASH_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
+            <Input label="Online Amount" value={row.UPI_ONLINE_AMOUNT} onChange={(e) => handleNewRowChange(index, 'UPI_ONLINE_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
+            <Input label="Credit Amount" value={row.CREDIT_AMOUNT} onChange={(e) => handleNewRowChange(index, 'CREDIT_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
+            <Input label="Transaction Ref" value={row.TRANSACTION_REFNO} onChange={(e) => handleNewRowChange(index, 'TRANSACTION_REFNO', e.target.value)} style={{ minWidth: 160 }} />
+            <Input label="Total" value={row.TOTAL_AMOUNT} onChange={(e) => handleNewRowChange(index, 'TOTAL_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
+            <Input label="Payment Date" type="date"
               value={row.PAYMENT_DATE ? row.PAYMENT_DATE.toISOString().split('T')[0] : ''}
-              onChange={(e) =>{
-                const dateValue = e.target.value ? new Date(e.target.value) : null;
-                handleNewRowChange(index, 'PAYMENT_DATE', dateValue)
-              }}
-              style={{ minWidth: 100 }}
+              onChange={(e) => handleNewRowChange(index, 'PAYMENT_DATE', e.target.value ? new Date(e.target.value) : null)}
+              style={{ minWidth: 130 }}
             />
-
-
-            <Input
-              label="Reamrk"
-              value={row.REMARK}
-              onChange={(e) =>
-                handleNewRowChange(index, 'REMARK', e.target.value)
-              }
-              style={{ minWidth: 200 }}
-            />
-
-            {/* 🔥 Remove button per row */}
-            <Button
-              variant="outline"
-              onClick={() => removeNewRow(index)}
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              ❌
-            </Button>
+            <Input label="Remark" value={row.REMARK} onChange={(e) => handleNewRowChange(index, 'REMARK', e.target.value)} style={{ minWidth: 180 }} />
+            <Button variant="outline" onClick={() => removeNewRow(index)} style={{ whiteSpace: 'nowrap' }}>❌</Button>
           </div>
         ))}
 
-        <Button onClick={addNewRow}>
-          ➕ Add Row
-        </Button>
+        <Button onClick={addNewRow}>➕ Add Row</Button>
       </Modal>
 
     </DashboardLayout>

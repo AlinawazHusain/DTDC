@@ -286,7 +286,7 @@ export default function SignupPage() {
     </p>
 
     <button
-      onClick={() => navigate('/app/dashboard')}
+      onClick={() => navigate('/app/bookings')}
       style={{
         padding: '14px 24px',
         fontSize: 16,
@@ -301,7 +301,7 @@ export default function SignupPage() {
       onMouseEnter={e => e.currentTarget.style.background = COLORS.primaryDark}
       onMouseLeave={e => e.currentTarget.style.background = COLORS.primary}
     >
-      Go to Dashboard 🚀
+      Go to Account 🚀
     </button>
   </div>
 )}

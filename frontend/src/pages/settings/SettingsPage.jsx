@@ -163,46 +163,151 @@ function FranchiseProfile({ data, onSave }) {
     try {
       setSaving(true)
       const token = localStorage.getItem('access_token')
+
       const api_body = {
-        frenchise_name : form.frenchise_name,
-        owner_name : form.owner_name,
-        phone_number :form.phone_number,
-        owner_email :form.owner_email,
-        gst_number :form.gst_number,
-        frenchise_code : form.frenchise_code,
-        city :form.city,
-        business_address : form.business_address
+        frenchise_name    : form.frenchise_name,
+        owner_name        : form.owner_name,
+        phone_number      : form.phone_number,
+        owner_email       : form.owner_email,
+        gst_number        : form.gst_number,
+        frenchise_code    : form.frenchise_code,
+        city              : form.city,
+        business_address  : form.business_address,
+        website_url       : form.website_url??"",
+        moto              : form.moto?? "",
+        tan_number        : form.tan_number??"",
+        kyc_id_number     : form.kyc_id_number??"",
+        kyc_doc_type      : form.kyc_doc_type??"",
+        // kyc_doc & agreement_doc are handled separately
       }
-      const updated = await callApi({ 
-        url: '/api/updateFrenchiseProfile',
+
+      const updated = await callApi({
+        url: '/api/updateFrenchiseProfile', // Keep original API
         method: 'PUT',
-        body: api_body ,
+        body: api_body,
         headers: { Authorization: `Bearer ${token}` }
       })
+
       onSave(updated.data)
       addToast('Profile saved!', 'success')
-    } catch {
+    } catch (err) {
+      console.error(err)
       addToast('Failed to save profile', 'error')
     } finally {
       setSaving(false)
     }
   }
 
-  return (
+  const KYC_DOC_TYPES = [ { value: '', label: '— Select Document Type —' }, { value: 'aadhaar_card', label: 'Aadhaar Card' }, { value: 'pan_card', label: 'PAN Card' }, { value: 'driving_licence', label: 'Driving Licence' }, { value: 'passport', label: 'Passport' }, { value: 'voter_id', label: 'Voter ID Card' }, { value: 'nrega_job_card', label: 'NREGA Job Card' }, { value: 'npr_letter', label: 'National Population Register Letter' }, { value: 'other', label: 'Other' }, ]
+  // ─── Document handlers ───────────────────────────────
+  const handleFileUpload = async (type, file) => {
+    try {
+      const token = localStorage.getItem('access_token')
+      const formData = new FormData()
+      formData.append('name', type)
+      formData.append('file', file) 
 
+      const res = await callApi({
+        url: '/api/uploadFrenchiseDoc',
+        method: 'POST',
+        body: formData,
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res && res.url){
+        setForm(prev => ({ ...prev, [type]: res.url }))
+      }
+      addToast(`${type === 'kyc_doc' ? 'KYC' : 'Agreement'} document uploaded!`, 'success')
+    } catch (err) {
+      console.error(err)
+      addToast('Failed to upload document', 'error')
+    }
+  }
+
+  return (
     <SettingsCard title="Business Information">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0 20px' }}>
         <Input label="Franchise Name"      value={form.frenchise_name}     onChange={set('frenchise_name')} />
-        <Input label="Owner Name"          value={form.owner_name}    onChange={set('owner_name')} />
-        <Input label="Phone"               value={form.phone_number}    onChange={set('phone_number')} />
-        <Input label="Email"               value={form.owner_email}    onChange={set('owner_email')} type="email" />
-        <Input label="GSTIN"               value={form.gst_number}    onChange={set('gst_number')} />
-        <Input label="DTDC Franchise Code" value={form.frenchise_code} onChange={set('frenchise_code')} />
-        <Input label="City"               value={form.city}    onChange={set('city')} />
-        <div style={{ gridColumn: '1 / -1' }}>
-          <Input label="Business Address" value={form.business_address} onChange={set('business_address')} type="textarea" rows={2} />
+        <Input label="Owner Name"          value={form.owner_name}         onChange={set('owner_name')} />
+        <Input label="Phone"               value={form.phone_number}      onChange={set('phone_number')} />
+        <Input label="Email"               value={form.owner_email}       onChange={set('owner_email')} type="email" />
+        <Input label="GSTIN"               value={form.gst_number}        onChange={set('gst_number')} />
+        <Input label="DTDC Franchise Code" value={form.frenchise_code}    onChange={set('frenchise_code')} />
+        <Input label="City"                value={form.city}              onChange={set('city')} />
+        <Input label="Website URL"         value={form.website_url}       onChange={set('website_url')} />
+        <Input label="Moto"                value={form.moto}              onChange={set('moto')} />
+        <Input label="TAN Number"          value={form.tan_number}        onChange={set('tan_number')} />
+        <Input label="KYC ID Number"       value={form.kyc_id_number}    onChange={set('kyc_id_number')} />
+
+        <div>
+        <label style={{ display: 'block', marginBottom: 6 }}>KYC Document Type</label>
+        <select
+          value={form.kyc_doc_type}
+          onChange={set('kyc_doc_type')}
+          style={{ width: '100%', height: 36, padding: '6px 10px', fontSize: 14 }}
+        >
+          {KYC_DOC_TYPES.map(doc => (
+            <option key={doc.value} value={doc.value}>{doc.label}</option>
+          ))}
+        </select>
+      </div>
+
+        {/* ─── KYC & Agreement Doc View/Upload ─── */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            style={{
+              background: form.kyc_doc ? '#d4edda' : 'transparent',
+              color: form.kyc_doc ? '#155724' : 'inherit'
+            }}
+            onClick={() => form.kyc_doc && window.open(form.kyc_doc, '_blank')}
+          >
+            View KYC
+          </Button>
+          <input
+            type="file"
+            style={{ display: 'none' }}
+            id="kyc_doc_input"
+            onChange={e => handleFileUpload('kyc_doc', e.target.files[0])}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => document.getElementById('kyc_doc_input').click()}
+          >
+            Upload
+          </Button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 20 }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            style={{
+              background: form.agreement_doc ? '#d4edda' : 'transparent',
+              color: form.agreement_doc ? '#155724' : 'inherit'
+            }}
+            onClick={() => form.agreement_doc && window.open(form.agreement_doc, '_blank')}
+          >
+            View Agreement
+          </Button>
+          <input
+            type="file"
+            style={{ display: 'none' }}
+            id="agreement_doc_input"
+            onChange={e => handleFileUpload('agreement_doc', e.target.files[0])}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => document.getElementById('agreement_doc_input').click()}
+          >
+            Upload
+          </Button>
         </div>
       </div>
+
+      {/* ─── Main Save Button for text fields ─── */}
       <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
     </SettingsCard>
   )

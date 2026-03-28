@@ -1,5 +1,5 @@
 import datetime
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.future import select
 from fastapi import APIRouter , Depends , HTTPException, status
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from db.tables import Clients, Frenchise, Invoice,  Users , DSRRecord
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.db import  get_async_db
-from utils import  coerce_value, create_access_token, create_refresh_token, parse_date, verify_token
+from utils import  coerce_value, parse_date, verify_token
 from sqlalchemy import desc , delete, update
 
 
@@ -17,8 +17,12 @@ booking_router = APIRouter()
 
 
 
-@booking_router.get("/bookings")
-async def bookings(db: AsyncSession = Depends(get_async_db) ,user=Depends(verify_token)):
+@booking_router.get("/bookings/filter")
+async def bookings(client_id: Optional[int] = None,
+                    date_from: Optional[datetime.date] = None,
+                    date_to:Optional[datetime.date] = None,
+                    db: AsyncSession = Depends(get_async_db) ,
+                    user=Depends(verify_token)):
     result = await db.execute(
         select(Users).where(Users.email == user["email"])
     )
@@ -30,19 +34,71 @@ async def bookings(db: AsyncSession = Depends(get_async_db) ,user=Depends(verify
     if not db_user.frenchise_id:
         raise HTTPException(status_code=400, detail="User has no franchise assigned")
     
-    result = await db.execute(
-        select(DSRRecord)
-        .where(DSRRecord.frenchise_id == db_user.frenchise_id)
-        .order_by(desc(DSRRecord.id))
+
+    query = select(DSRRecord).where(
+        DSRRecord.frenchise_id == db_user.frenchise_id
     )
+
+    client_name_map = {}
+
+
+    if client_id:
+        client_data = await db.execute(
+            select(Clients)
+            .where(Clients.id == client_id)
+        )
+        client_data = client_data.scalar_one_or_none()
+
+        if not client_data:
+            raise HTTPException(status_code=404, detail="Client not found")
+        
+        client_name_map = {client_data.dsr_act_cust_code: client_data.name}
+
+        query = query.where(DSRRecord.DSR_ACT_CUST_CODE == client_data.dsr_act_cust_code)
+
+
+    if date_from and date_to:
+        query = query.where(DSRRecord.DSR_BOOKING_DATE.between(date_from, date_to))
+
+    elif date_from:
+        query = query.where(DSRRecord.DSR_BOOKING_DATE >= date_from)
+
+    elif date_to:
+        query = query.where(DSRRecord.DSR_BOOKING_DATE <= date_to)
+
+    # 👉 ordering
+    query = query.order_by(desc(DSRRecord.id))
+
+    result = await db.execute(query)
 
     all_bookings = result.scalars().all()
 
+    if not client_id:
+        codes = {b.DSR_ACT_CUST_CODE for b in all_bookings if b.DSR_ACT_CUST_CODE}
+
+        if codes:
+            client_result = await db.execute(
+                select(Clients).where(Clients.dsr_act_cust_code.in_(codes))
+            )
+            clients = client_result.scalars().all()
+
+            # map: code -> name
+            client_name_map = {
+                c.dsr_act_cust_code: c.name for c in clients
+            }
+
+
     bookings_list = [
-        {k: (v.isoformat() if hasattr(v, "isoformat") else v) 
-         for k, v in b.__dict__.items() if not k.startswith("_")}
-        for b in all_bookings
-    ]
+    {
+        **{
+            k: (v.isoformat() if hasattr(v, "isoformat") else v)
+            for k, v in b.__dict__.items()
+            if not k.startswith("_")
+        },
+        "client_name": client_name_map.get(b.DSR_ACT_CUST_CODE)
+    }
+    for b in all_bookings
+]
     return {"bookings": bookings_list}
 
     
@@ -230,7 +286,8 @@ async def add_booking(
         if not existing_record:
             record = DSRRecord(
                 frenchise_id=frenchise_id,
-                DSR_CUST_CODE=client.dsr_cust_code,
+                DSR_CUST_CODE=client.dsr_act_cust_code,
+                DSR_ACT_CUST_CODE = client.dsr_act_cust_code,
                 DSR_CNNO=booking.get("DSR_CNNO"),
                 DSR_REFNO=booking.get("DSR_REF_NO"),
                 CHARGEABLE_WEIGHT=float(booking.get("CHARGEABLE_WEIGHT") or 0),
@@ -308,13 +365,13 @@ async def generate_invoice(
         raise HTTPException(status_code=404, detail="No DSR records found for provided IDs")
 
     # Ensure all DSR records are for the same client
-    client_codes = set(record.DSR_CUST_CODE for record in dsr_records)
+    client_codes = set(record.DSR_ACT_CUST_CODE for record in dsr_records)
     if len(client_codes) > 1:
         raise HTTPException(status_code=400, detail="All DSR records must belong to the same client")
     client_code = client_codes.pop()
 
     # Fetch client
-    stmt_client = select(Clients).where(Clients.dsr_cust_code == client_code)
+    stmt_client = select(Clients).where(Clients.dsr_act_cust_code == client_code)
     client = (await db.execute(stmt_client)).scalar_one_or_none()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
