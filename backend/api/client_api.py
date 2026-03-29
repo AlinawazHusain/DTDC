@@ -1,5 +1,6 @@
 from typing import Optional
 
+from bucket_utils import upload_file_to_railway
 from utils import verify_owner_token, verify_token
 from sqlalchemy.future import select
 from fastapi import APIRouter , Depends , HTTPException , Query , Form , UploadFile , File
@@ -277,7 +278,19 @@ async def upload_file(
     db: AsyncSession = Depends(get_async_db),
     user = Depends(verify_token)
 ):
-    print(client_id , doc_type)
+    result = await db.execute(
+        select(Clients).where(Clients.id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    url = await upload_file_to_railway(file, f"client_{client_id}_{doc_type}")
+    setattr(client, doc_type, url)
+    print(doc_type)
+    # 5️⃣ Commit changes
+    await db.commit()
     return {
-        "url" : "https://www.google.com/url?sa=t&source=web&rct=j&url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FWikipedia&ved=0CBYQjRxqFwoTCPCEsaStw5MDFQAAAAAdAAAAABAj&opi=89978449"
+        "url" : url
     }

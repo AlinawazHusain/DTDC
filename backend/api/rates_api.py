@@ -182,10 +182,14 @@ async def calculate_cost(req: CostRequest, db: AsyncSession = Depends(get_async_
         raise HTTPException(status_code=404, detail="No rate plan for this client")
     return _calculate_cost(plan.slabs, req.weight_kg)
 
+
+
 @rate_router.get("/rates/transport-types")
 async def transport_types(db: AsyncSession = Depends(get_async_db), user=Depends(verify_token)):
     types = (await db.execute(select(TransportTypes).order_by(desc(TransportTypes.id)))).scalars().all()
     return {"types": [t.transport_type for t in types]}
+
+
 
 @rate_router.post("/rates/add-transport-types")
 async def add_transport_types(data: dict, db: AsyncSession = Depends(get_async_db), user=Depends(verify_token)):

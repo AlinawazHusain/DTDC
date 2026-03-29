@@ -1,4 +1,4 @@
-from bucket_utils import upload_file_to_railway
+from bucket_utils import get_url_for_file, upload_file_to_railway
 from sqlalchemy.future import select
 from fastapi import APIRouter , Depends , HTTPException , Form , File , UploadFile
 from pydantic import BaseModel
@@ -278,12 +278,36 @@ async def editUser(data:editUserData ,  db: AsyncSession = Depends(get_async_db)
 
 @setting_router.post("/uploadFrenchiseDoc")
 async def upload_file(
-    name: str = Form(...),  # 'kyc_doc' or 'agreement_doc'
+    name: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_async_db),
     user=Depends(verify_owner_token)
 ):
-    url = await upload_file_to_railway(file, name)
-    print(url)
-    return {"url" : url}
+    result = await db.execute(
+        select(Users).where(Users.email == user["email"])
+    )
+    db_user = result.scalar_one_or_none()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not db_user.frenchise_id:
+        raise HTTPException(status_code=400, detail="User has no franchise assigned")
+
+    result = await db.execute(
+        select(Frenchise).where(Frenchise.id == db_user.frenchise_id)
+    )
+    frenchise = result.scalar_one_or_none()
+
+    if not frenchise:
+        raise HTTPException(status_code=404, detail="Franchise not found")
     
+    frenchise_id = frenchise.id
+    
+    url = await upload_file_to_railway(file, f"frenchise_{frenchise_id}_{name}")
+    setattr(frenchise, name, url)
+    # 5️⃣ Commit changes
+    await db.commit()
+    return {
+        "url" : url
+    }

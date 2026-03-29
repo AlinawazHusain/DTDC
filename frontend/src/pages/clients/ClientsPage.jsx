@@ -199,7 +199,7 @@ export default function ClientsPage() {
     if (!file)               return
     if (!editingClient?.id) { addToast('Save the client first before uploading documents.', 'error'); return }
 
-    const isKyc        = docType === 'kyc'
+    const isKyc        = docType === 'kyc_doc'
     const setUploading = isKyc ? setKycUploading : setAgreementUploading
     const setLiveUrl   = isKyc ? setLiveKycUrl   : setLiveAgreementUrl
     const label        = isKyc ? 'KYC'           : 'Agreement'
@@ -478,7 +478,7 @@ export default function ClientsPage() {
                 uploading={kycUploading}
                 fileInputRef={kycFileRef}
                 accept={ACCEPTED_DOC}
-                onFileChange={(file) => handleDocUpload('kyc', file)}
+                onFileChange={(file) => handleDocUpload('kyc_doc', file)}
               />
 
               {/* ── Agreement Document ── */}
@@ -489,7 +489,7 @@ export default function ClientsPage() {
                 uploading={agreementUploading}
                 fileInputRef={agreementFileRef}
                 accept={ACCEPTED_DOC}
-                onFileChange={(file) => handleDocUpload('agreement', file)}
+                onFileChange={(file) => handleDocUpload('agreement_doc', file)}
               />
 
             </div>
