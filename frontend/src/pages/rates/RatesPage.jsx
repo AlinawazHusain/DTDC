@@ -5,8 +5,6 @@ import { COLORS, RADIUS } from '../../constants/theme'
 import { useApp } from '../../context/AppContext'
 import { callApi } from '../../utils/api'
 
-// ─── Transport types come from backend (plain strings) ───────────────────────
-
 // ─── uid for local keys ───────────────────────────────────────────────────────
 let _uid = 0
 const uid = () => ++_uid
@@ -19,22 +17,21 @@ const emptySlabs = () => [
 
 const emptyPlan = () => ({
   _key:           uid(),
-  id:             null,          // null = not yet saved to server
+  id:             null,
   transport_type: '',
   slabs:          emptySlabs(),
   saving:         false,
-  expanded:       true,          // new plans start open
+  expanded:       true,
 })
 
 function buildPlanFromApi(p) {
-  console.log(p)
   return {
     _key:           uid(),
     id:             p.id,
     transport_type: p.transport_type ?? '',
     slabs:          (p.slabs ?? []).map(s => ({ ...s, _key: uid() })),
     saving:         false,
-    expanded:       false,       // loaded plans start collapsed
+    expanded:       false,
   }
 }
 
@@ -54,7 +51,7 @@ const inputStyle = {
   transition: 'border-color 0.15s',
 }
 
-// ─── ClientSearch (unchanged) ─────────────────────────────────────────────────
+// ─── ClientSearch ─────────────────────────────────────────────────────────────
 function ClientSearch({ onSelect }) {
   const [query,   setQuery]   = useState('')
   const [results, setResults] = useState([])
@@ -151,6 +148,148 @@ function ClientSearch({ onSelect }) {
   )
 }
 
+// ─── GSTSettings — per-client, fetched + saved independently ─────────────────
+function GSTSettings({ clientId }) {
+  const { addToast } = useApp()
+
+  const [cgst,    setCgst]    = useState('')
+  const [sgst,    setSgst]    = useState('')
+  const [igst,    setIgst]    = useState('')
+  const [gstId,   setGstId]   = useState(null)   // null = no record yet
+  const [loading, setLoading] = useState(true)
+  const [saving,  setSaving]  = useState(false)
+
+  // Fetch existing GST config for this client
+  useEffect(() => {
+    if (!clientId) return
+    setLoading(true)
+    const token = localStorage.getItem('access_token')
+    callApi({
+      url:     `/api/rates/gst/${clientId}`,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(data => {
+        if (data && data.id) {
+          setGstId(data.id)
+          setCgst(data.cgst ?? '')
+          setSgst(data.sgst ?? '')
+          setIgst(data.igst ?? '')
+        } else {
+          setGstId(null); setCgst(''); setSgst(''); setIgst('')
+        }
+      })
+      .catch(() => {
+        // 404 = no record yet, that's fine
+        setGstId(null); setCgst(''); setSgst(''); setIgst('')
+      })
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  const handleSave = async () => {
+    // Basic validation — allow 0 but not negative or blank
+    for (const [label, val] of [['CGST', cgst], ['SGST', sgst], ['IGST', igst]]) {
+      if (val === '' || isNaN(Number(val)) || Number(val) < 0) {
+        addToast(`${label} must be a valid non-negative number.`, 'error'); return
+      }
+    }
+    setSaving(true)
+    try {
+      const token   = localStorage.getItem('access_token')
+      const payload = {
+        client_id: clientId,
+        cgst: Number(cgst),
+        sgst: Number(sgst),
+        igst: Number(igst),
+      }
+      let saved
+      if (gstId) {
+        // update
+        saved = await callApi({
+          url:    `/api/rates/gst/${gstId}`,
+          method: 'PUT',
+          body:   payload,
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      } else {
+        // create
+        saved = await callApi({
+          url:    '/api/rates/gst',
+          method: 'POST',
+          body:   payload,
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        setGstId(saved.id)
+      }
+      addToast('GST settings saved!', 'success')
+    } catch (e) {
+      addToast(e.message || 'Failed to save GST settings', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const pctInput = (label, value, setter) => (
+    <div style={{ flex: '1 1 120px', minWidth: 100 }}>
+      <label style={labelStyle}>{label} (%)</label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="number" min="0" max="100" step="0.01"
+          value={value}
+          placeholder="0.00"
+          onChange={e => setter(e.target.value)}
+          style={{ ...inputStyle, paddingRight: 28 }}
+        />
+        <span style={{
+          position: 'absolute', right: 10, top: '50%',
+          transform: 'translateY(-50%)', fontSize: 12, color: COLORS.gray,
+        }}>%</span>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{
+      background: COLORS.white, borderRadius: RADIUS.lg,
+      border: `1px solid ${COLORS.border}`, padding: '20px 22px',
+      marginBottom: 20,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.dark }}>GST Settings</div>
+          <div style={{ fontSize: 12, color: COLORS.gray, marginTop: 2 }}>
+            Applied to all invoices for this client · set once across all transport types
+          </div>
+        </div>
+        {gstId && (
+          <span style={{
+            fontSize: 11, fontWeight: 700,
+            background: '#e8f5e9', color: '#2e7d32',
+            border: '1px solid #a5d6a7',
+            borderRadius: RADIUS.full, padding: '3px 10px',
+          }}>✓ Configured</span>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 13, color: COLORS.gray }}>Loading GST settings…</div>
+      ) : (
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' ,justifyContent: 'space-between',}}>
+          {pctInput('CGST', cgst, setCgst)}
+          {pctInput('SGST', sgst, setSgst)}
+          {pctInput('IGST', igst, setIgst)}
+
+
+          <div style={{ paddingBottom: 1 }}>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : gstId ? '💾 Update GST' : '✨ Save GST'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── SlabRow ──────────────────────────────────────────────────────────────────
 function SlabRow({ slab, idx, total, onChange, onRemove }) {
   const isLast = idx === total - 1
@@ -162,7 +301,6 @@ function SlabRow({ slab, idx, total, onChange, onRemove }) {
       padding: '10px 0',
       borderBottom: idx < total - 1 ? `1px dashed ${COLORS.grayLight}` : 'none',
     }}>
-      {/* Row badge */}
       <div style={{
         width: 26, height: 26, borderRadius: '50%',
         background: COLORS.primary + '18', color: COLORS.primary,
@@ -172,7 +310,6 @@ function SlabRow({ slab, idx, total, onChange, onRemove }) {
         {idx + 1}
       </div>
 
-      {/* From */}
       <div>
         <label style={labelStyle}>From (kg)</label>
         <input
@@ -183,7 +320,6 @@ function SlabRow({ slab, idx, total, onChange, onRemove }) {
         />
       </div>
 
-      {/* To */}
       <div>
         <label style={labelStyle}>
           To (kg){isLast && <span style={{ color: COLORS.gray, fontWeight: 400, textTransform: 'none' }}> — blank = ∞</span>}
@@ -197,7 +333,6 @@ function SlabRow({ slab, idx, total, onChange, onRemove }) {
         />
       </div>
 
-      {/* Rate */}
       <div>
         <label style={labelStyle}>₹ per kg</label>
         <div style={{ position: 'relative' }}>
@@ -211,7 +346,6 @@ function SlabRow({ slab, idx, total, onChange, onRemove }) {
         </div>
       </div>
 
-      {/* Remove */}
       <button
         onClick={() => onRemove(slab._key)}
         disabled={total <= 1}
@@ -257,7 +391,7 @@ function SlabStrip({ slabs }) {
 }
 
 // ─── CostCalculator ───────────────────────────────────────────────────────────
-function CostCalculator({ clientId, planId, transportType }) {
+function CostCalculator({ clientId, planId }) {
   const [weight,  setWeight]  = useState('')
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
@@ -361,12 +495,15 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
   const [expanded,      setExpanded]      = useState(plan.expanded)
   const [saving,        setSaving]        = useState(false)
 
-  const isNew      = !plan.id
-  const hasType    = Boolean(transportType)
-  const typeLabel  = transportType || '—'
+  const isNew     = !plan.id
+  const hasType   = Boolean(transportType)
+  const typeLabel = transportType || '—'
 
-  // Duplicate = another plan (not this one) already claims the same type
-  const isDuplicate = hasType && usedTypes.filter(t => t === transportType).length > 1
+  // Only exclude types used by OTHER plans (not this one's own type)
+  const takenByOthers = usedTypes.filter(t => t !== plan.transport_type)
+
+  // Available types = all types minus those taken by other plans
+  const availableTypes = transportTypes.filter(t => !takenByOthers.includes(t))
 
   // ── slab mutations ──────────────────────────────────────────────────────
   const addSlab = () => {
@@ -392,10 +529,9 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
     setSlabs(prev => prev.filter(s => s._key !== key))
   }
 
-  // ── save this plan ──────────────────────────────────────────────────────
+  // ── save ────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!transportType) { addToast('Select a transport type for this plan.', 'error'); return }
-    if (isDuplicate) { addToast('Another plan already uses this transport type. Pick a different one.', 'error'); return }
     for (const s of slabs) {
       if (s.rate_per_kg === '' || s.rate_per_kg < 0) {
         addToast('All slabs must have a valid rate.', 'error'); return
@@ -413,10 +549,8 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
           rate_per_kg: Number(rate_per_kg),
         })),
       }
-
       let saved
       if (plan.id) {
-        // update existing plan
         saved = await callApi({
           url:    `/api/rates/plan/${plan.id}`,
           method: 'PUT',
@@ -424,7 +558,6 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
           headers: { Authorization: `Bearer ${token}` },
         })
       } else {
-        // create new plan
         saved = await callApi({
           url:    '/api/rates/plan',
           method: 'POST',
@@ -432,8 +565,6 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
           headers: { Authorization: `Bearer ${token}` },
         })
       }
-
-      // propagate id + type up so parent can track
       onUpdate(plan._key, { id: saved.id ?? plan.id, transport_type: transportType })
       addToast(`${typeLabel} plan ${plan.id ? 'updated' : 'created'}!`, 'success')
       setExpanded(false)
@@ -444,9 +575,9 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
     }
   }
 
-  // ── delete this plan ────────────────────────────────────────────────────
+  // ── delete ──────────────────────────────────────────────────────────────
   const handleDelete = async () => {
-    if (!plan.id) { onDelete(plan._key); return }   // unsaved — just remove locally
+    if (!plan.id) { onDelete(plan._key); return }
     if (!window.confirm(`Delete ${typeLabel} plan?`)) return
     try {
       const token = localStorage.getItem('access_token')
@@ -480,12 +611,10 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
           padding: '14px 20px', cursor: 'pointer',
           background: expanded ? COLORS.bgPage : COLORS.white,
           borderBottom: expanded ? `1px solid ${COLORS.grayLight}` : 'none',
-          userSelect: 'none',
-          transition: 'background 0.15s',
+          userSelect: 'none', transition: 'background 0.15s',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Colour dot — green = saved, amber = new */}
           <div style={{
             width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
             background: plan.id ? '#27ae60' : COLORS.warning,
@@ -504,20 +633,6 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-          {/* Test calculator toggle — only for saved plans */}
-          {plan.id && !expanded && (
-            <button
-              onClick={() => { setShowCalc(c => !c); setExpanded(true) }}
-              style={{
-                padding: '5px 11px', fontSize: 12, fontWeight: 600,
-                border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.md,
-                background: 'transparent', cursor: 'pointer', color: COLORS.gray,
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              💡 Test
-            </button>
-          )}
           <button
             onClick={handleDelete}
             style={{
@@ -539,7 +654,7 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
       {expanded && (
         <div style={{ padding: '20px 22px' }}>
 
-          {/* Transport type selector — driven by backend list */}
+          {/* Transport type selector — only shows available (unused) types */}
           <div style={{ marginBottom: 20 }}>
             <label style={labelStyle}>Transport Type *</label>
             <select
@@ -548,35 +663,27 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
               style={{
                 ...inputStyle,
                 width: 260, cursor: 'pointer', appearance: 'none',
-                borderColor: isDuplicate ? '#e74c3c' : COLORS.border,
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
                 backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center',
                 paddingRight: 32,
               }}
             >
               <option value=''>— Select Transport Type —</option>
-              {transportTypes.map(t => (
+              {availableTypes.map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
 
-            {!hasType && (
+            {availableTypes.length === 0 && !transportType && (
+              <p style={{ fontSize: 12, color: COLORS.gray, marginTop: 6, fontStyle: 'italic' }}>
+                All transport types already have a plan for this client.
+              </p>
+            )}
+
+            {!hasType && availableTypes.length > 0 && (
               <p style={{ fontSize: 12, color: '#e74c3c', marginTop: 6 }}>
                 Required — choose a transport type to continue.
               </p>
-            )}
-            {isDuplicate && (
-              <div style={{
-                display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8,
-                padding: '9px 12px', borderRadius: RADIUS.md,
-                background: '#fdf0f0', border: '1px solid #e74c3c30',
-              }}>
-                <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
-                <span style={{ fontSize: 12, color: '#c0392b', fontWeight: 600 }}>
-                  Another plan already uses <strong>{transportType}</strong>.
-                  Each transport type can only have one plan per client — pick a different type.
-                </span>
-              </div>
             )}
           </div>
 
@@ -602,19 +709,12 @@ function PlanCard({ plan, usedTypes, clientId, transportTypes, onUpdate, onDelet
             ))}
           </div>
 
-          {/* Slab preview strip */}
           <SlabStrip slabs={slabs} />
 
-          {/* Calculator (inline, for saved plans) */}
           {plan.id && (
-            <CostCalculator
-              clientId={clientId}
-              planId={plan.id}
-              transportType={transportType}
-            />
+            <CostCalculator clientId={clientId} planId={plan.id} />
           )}
 
-          {/* Save button */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20, gap: 10 }}>
             <button
               onClick={() => setExpanded(false)}
@@ -645,15 +745,13 @@ export default function RatesPage() {
   const [plans,          setPlans]          = useState([])
   const [loadingPlans,   setLoadingPlans]   = useState(false)
 
-  // Transport types from backend
   const [transportTypes, setTransportTypes] = useState([])
   const [loadingTypes,   setLoadingTypes]   = useState(true)
-  // Add transport type mini-modal
   const [showAddType,    setShowAddType]    = useState(false)
   const [newTypeName,    setNewTypeName]    = useState('')
   const [savingType,     setSavingType]     = useState(false)
 
-  // Fetch transport types once on mount
+  // Fetch transport types on mount
   useEffect(() => {
     const token = localStorage.getItem('access_token')
     callApi({ url: '/api/rates/transport-types', headers: { Authorization: `Bearer ${token}` } })
@@ -665,7 +763,6 @@ export default function RatesPage() {
       .finally(() => setLoadingTypes(false))
   }, [])
 
-  // Add a new transport type via API then append to local list
   const handleAddTransportType = async () => {
     const name = newTypeName.trim()
     if (!name) { addToast('Enter a transport type name.', 'error'); return }
@@ -680,7 +777,6 @@ export default function RatesPage() {
         body: { name },
         headers: { Authorization: `Bearer ${token}` },
       })
-      // Append the returned name (backend may normalise casing)
       const added = data.name ?? data.type ?? name
       setTransportTypes(prev => [...prev, added])
       setNewTypeName('')
@@ -693,7 +789,7 @@ export default function RatesPage() {
     }
   }
 
-  // ── load ALL plans when client changes ─────────────────────────────────
+  // Load plans when client changes
   useEffect(() => {
     if (!selectedClient) return
     setLoadingPlans(true)
@@ -713,29 +809,25 @@ export default function RatesPage() {
       .finally(() => setLoadingPlans(false))
   }, [selectedClient])
 
-  // ── add a blank plan card ───────────────────────────────────────────────
   const addPlan = () => {
     setPlans(prev => [...prev, emptyPlan()])
-    // scroll to bottom smoothly
     setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50)
   }
 
-  // ── callback from PlanCard after save — updates id / transport_type ────
   const handlePlanUpdate = (planKey, patch) => {
     setPlans(prev => prev.map(p => p._key === planKey ? { ...p, ...patch } : p))
   }
 
-  // ── callback from PlanCard to remove a plan ────────────────────────────
   const handlePlanDelete = (planKey) => {
     setPlans(prev => prev.filter(p => p._key !== planKey))
   }
 
-  // ── types already in use (to prevent duplicates) ───────────────────────
-  const usedTypes = plans.map(p => p.transport_type).filter(Boolean)
-
-  // ── summary counts ──────────────────────────────────────────────────────
-  const savedCount  = plans.filter(p => p.id).length
+  const usedTypes    = plans.map(p => p.transport_type).filter(Boolean)
+  const savedCount   = plans.filter(p => p.id).length
   const unsavedCount = plans.filter(p => !p.id).length
+
+  // Types that still have no plan — used to decide whether to show "Add Plan"
+  const remainingTypes = transportTypes.filter(t => !usedTypes.includes(t))
 
   return (
     <DashboardLayout>
@@ -751,14 +843,12 @@ export default function RatesPage() {
           </p>
         </div>
 
-        {selectedClient && !loadingPlans && (
-          <Button onClick={addPlan}>
-            + Add Plan
-          </Button>
+        {selectedClient && !loadingPlans && remainingTypes.length > 0 && (
+          <Button onClick={addPlan}>+ Add Plan</Button>
         )}
       </div>
 
-      {/* Transport Types panel */}
+      {/* ── Transport Types panel ── */}
       <div style={{ background: COLORS.white, borderRadius: RADIUS.lg, border: `1px solid ${COLORS.border}`, padding: '18px 22px', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
@@ -782,24 +872,33 @@ export default function RatesPage() {
             + Add Type
           </button>
         </div>
+
         {loadingTypes ? (
           <div style={{ color: COLORS.gray, fontSize: 13 }}>Loading transport types…</div>
         ) : transportTypes.length === 0 ? (
           <div style={{ color: COLORS.gray, fontSize: 13, fontStyle: 'italic' }}>No transport types yet — add one to get started.</div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {transportTypes.map(t => (
-              <span key={t} style={{
-                padding: '5px 14px', borderRadius: RADIUS.full,
-                background: COLORS.primary + '12', border: `1px solid ${COLORS.primary}25`,
-                fontSize: 12, fontWeight: 600, color: COLORS.primary,
-              }}>{t}</span>
-            ))}
+            {transportTypes.map(t => {
+              const inUse = usedTypes.includes(t)
+              return (
+                <span key={t} style={{
+                  padding: '5px 14px', borderRadius: RADIUS.full,
+                  background: inUse ? COLORS.primary + '18' : COLORS.bgPage,
+                  border: `1px solid ${inUse ? COLORS.primary + '35' : COLORS.border}`,
+                  fontSize: 12, fontWeight: 600,
+                  color: inUse ? COLORS.primary : COLORS.gray,
+                }}>
+                  {inUse && <span style={{ marginRight: 4 }}>✓</span>}
+                  {t}
+                </span>
+              )
+            })}
           </div>
         )}
       </div>
 
-      {/* Add Transport Type modal */}
+      {/* ── Add Transport Type modal ── */}
       {showAddType && (
         <div
           onClick={e => { if (e.target === e.currentTarget) setShowAddType(false) }}
@@ -865,7 +964,7 @@ export default function RatesPage() {
           Search and pick a client to view or manage their rate plans.
         </p>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <ClientSearch onSelect={c => { setSelectedClient(c) }} />
+          <ClientSearch onSelect={c => setSelectedClient(c)} />
 
           {selectedClient && (
             <div style={{
@@ -893,6 +992,11 @@ export default function RatesPage() {
         </div>
       </div>
 
+      {/* ── GST Settings — only shown when a client is selected ── */}
+      {selectedClient && !loadingPlans && (
+        <GSTSettings clientId={selectedClient.id} />
+      )}
+
       {/* ── Loading ── */}
       {loadingPlans && (
         <div style={{ textAlign: 'center', padding: '48px 20px', color: COLORS.gray }}>
@@ -916,11 +1020,10 @@ export default function RatesPage() {
               <p style={{ fontSize: 13, color: COLORS.gray, marginTop: 6, marginBottom: 20 }}>
                 Create a plan for each transport type this client uses.
               </p>
-              <Button onClick={addPlan}>+ Add First Plan</Button>
+              {remainingTypes.length > 0 && <Button onClick={addPlan}>+ Add First Plan</Button>}
             </div>
           ) : (
             <>
-              {/* Plan cards */}
               {plans.map(plan => (
                 <PlanCard
                   key={plan._key}
@@ -933,23 +1036,37 @@ export default function RatesPage() {
                 />
               ))}
 
-              {/* Add another plan */}
-              <button
-                onClick={addPlan}
-                style={{
-                  width: '100%', padding: '14px',
-                  border: `2px dashed ${COLORS.border}`, borderRadius: RADIUS.lg,
-                  background: 'transparent', cursor: 'pointer',
-                  color: COLORS.gray, fontSize: 14, fontWeight: 600,
-                  fontFamily: "'DM Sans', sans-serif",
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.primary; e.currentTarget.style.color = COLORS.primary }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.border;  e.currentTarget.style.color = COLORS.gray }}
-              >
-                + Add Another Plan
-              </button>
+              {/* Only show "Add Another Plan" if there are still unused types */}
+              {remainingTypes.length > 0 && (
+                <button
+                  onClick={addPlan}
+                  style={{
+                    width: '100%', padding: '14px',
+                    border: `2px dashed ${COLORS.border}`, borderRadius: RADIUS.lg,
+                    background: 'transparent', cursor: 'pointer',
+                    color: COLORS.gray, fontSize: 14, fontWeight: 600,
+                    fontFamily: "'DM Sans', sans-serif",
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.primary; e.currentTarget.style.color = COLORS.primary }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.border;  e.currentTarget.style.color = COLORS.gray }}
+                >
+                  + Add Another Plan
+                </button>
+              )}
+
+              {/* All types covered message */}
+              {remainingTypes.length === 0 && (
+                <div style={{
+                  textAlign: 'center', padding: '16px',
+                  border: `1px solid ${COLORS.success + '40'}`,
+                  borderRadius: RADIUS.lg, background: COLORS.success + '08',
+                  fontSize: 13, color: COLORS.success, fontWeight: 600,
+                }}>
+                  ✅ All transport types have a rate plan for this client.
+                </div>
+              )}
             </>
           )}
         </>

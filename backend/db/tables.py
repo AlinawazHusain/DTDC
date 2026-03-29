@@ -52,9 +52,9 @@ class Clients(Base):
     __tablename__ = "clients"
 
     id = Column(Integer, primary_key=True, autoincrement=True , index = True)
-    name = Column(String(255))
+    name = Column(String(255) , index = True)
     cin_number = Column(String(255))
-    phone_number = Column(String(15))
+    phone_number = Column(String(15) , index = True)
     email = Column(String(255))
     pincode = Column(String(10))
     gst_number = Column(String(50))
@@ -210,26 +210,18 @@ class Invoice(Base):
     __tablename__ = "invoices"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    invoice_no = Column(String(100), unique=True, nullable=False)
-    invoice_date = Column(Date, default=datetime.now)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
-    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=True)
+    invoice_number = Column(String(100), unique=True, nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index = True)
+    client_name = Column(String)
+   
+    booking_count = Column(Integer)
+    dsr_ids = Column(JSON, nullable=False)
 
-    total_bookings = Column(Integer, nullable=False)
-    subtotal = Column(Float, nullable=False, default=0.0)
-    cgst = Column(Float, nullable=False, default=0.0)
-    sgst = Column(Float, nullable=False, default=0.0)
-    igst = Column(Float, nullable=False, default=0.0)
-    grand_total = Column(Float, nullable=False, default=0.0)
-
-    dsr_ids = Column(JSON, nullable=False)  # Store list of DSRRecord IDs
-
+    total_amount = Column(Float, nullable=False, default=0.0)
+    pdf_url = Column(String)
     created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # Optional relationship
-    client = relationship("Clients", backref="invoices")
-    frenchise = relationship("Frenchise", backref="invoices")
+    frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=False , index = True)
 
 
 

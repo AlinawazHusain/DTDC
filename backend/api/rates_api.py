@@ -203,3 +203,20 @@ async def add_transport_types(data: dict, db: AsyncSession = Depends(get_async_d
     db.add(new_type)
     await db.commit()
     return {"type": name}
+
+
+
+
+@rate_router.get("/rates/gst/{client_id}")
+async def get_gst(client_id: int,
+                    db: AsyncSession = Depends(get_async_db),
+                     user=Depends(verify_token)):
+    print("here")
+    return {"id" : 1, "client_id" : 1, "cgst" : 9, "sgst" : 9, "igst" : 9 }
+
+
+
+
+@rate_router.post("/rates/gst")
+async def add_gst(data: dict, db: AsyncSession = Depends(get_async_db), user=Depends(verify_token)):
+    return { "id":1 , "client_id" : data["client_id"], "cgst" : data["cgst"], "sgst" : data["sgst"], "igst" : data["igst"] }
