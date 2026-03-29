@@ -7,7 +7,6 @@ import LandingPage from './pages/landing/LandingPage'
 // App pages
 import BookingsPage  from './pages/bookings/BookingsPage'
 import InvoicesPage  from './pages/invoices/InvoicesPage'
-import InvoiceGeneratorPage from './pages/invoices/InvoiceGeneratorPage'
 import ClientsPage   from './pages/clients/ClientsPage'
 import RatesPage     from './pages/rates/RatesPage'
 import SettingsPage  from './pages/settings/SettingsPage'
@@ -26,7 +25,6 @@ export default function App() {
           <Route path="/"  element={<LandingPage />} />
           <Route path="/login"  element={<LoginPage />}  />
           <Route path="/signup" element={<SignupPage />} />
-          <Route path="invoice-generator" element={<InvoiceGeneratorPage />} />
 
           {/* App (authenticated) routes */}
           <Route path="/app">
