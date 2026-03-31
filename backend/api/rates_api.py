@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from utils import verify_token
 from db.db import get_async_db
-from db.tables import Clients, RatePlan, RateSlab, TransportTypes
+from db.tables import Clients, GstPerClient, RatePlan, RateSlab, TransportTypes
 
 rate_router = APIRouter()
 
@@ -211,12 +211,32 @@ async def add_transport_types(data: dict, db: AsyncSession = Depends(get_async_d
 async def get_gst(client_id: int,
                     db: AsyncSession = Depends(get_async_db),
                      user=Depends(verify_token)):
-    print("here")
-    return {"id" : 1, "client_id" : 1, "cgst" : 9, "sgst" : 9, "igst" : 9 }
+    cli_gsts = await db.execute(select(GstPerClient).where(GstPerClient.client_id == client_id))
+    gsts = cli_gsts.scalar_one_or_none()
+    if not gsts:
+        return {}
+    return {"id" : gsts.id, "client_id" : gsts.client_id, "cgst" : gsts.cgst, "sgst" : gsts.sgst, "igst" : gsts.igst }
 
 
 
 
 @rate_router.post("/rates/gst")
 async def add_gst(data: dict, db: AsyncSession = Depends(get_async_db), user=Depends(verify_token)):
+    cli_gsts = await db.execute(select(GstPerClient).where(GstPerClient.client_id == data["client_id"]))
+    gsts = cli_gsts.scalar_one_or_none()
+    if gsts:
+        gsts.cgst = data["cgst"]
+        gsts.sgst = data["sgst"]
+        gsts.igst = data["igst"]
+    
+    else:
+        new_gst = GstPerClient(
+            client_id = data["client_id"],
+            cgst = data["cgst"],
+            sgst =  data["sgst"],
+            igst = data["igst"]
+        )
+        db.add(new_gst)
+    await db.commit()
+
     return { "id":1 , "client_id" : data["client_id"], "cgst" : data["cgst"], "sgst" : data["sgst"], "igst" : data["igst"] }

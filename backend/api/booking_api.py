@@ -1,14 +1,18 @@
 import datetime
 from typing import Any, Optional
 
+from gst_calc_utils import calculate_final_amount, get_state_from_pincode
 from sqlalchemy.future import select
 from fastapi import APIRouter , Depends , HTTPException, status
 from pydantic import BaseModel
-from db.tables import Clients, Frenchise, Invoice,  Users , DSRRecord
+from db.tables import Clients, Frenchise, GstPerClient, Invoice, RatePlan, RateSlab,  Users , DSRRecord
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.db import  get_async_db
 from utils import  coerce_value, parse_date, verify_token
 from sqlalchemy import desc , delete, update
+from sqlalchemy.orm import selectinload
+from collections import defaultdict
+from sqlalchemy import select
 
 
 
@@ -104,14 +108,22 @@ async def bookings(client_id: Optional[int] = None,
     
 
 
+from collections import defaultdict
+from fastapi import HTTPException, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 class BookingUploadPayload(BaseModel):
     data: list[dict[str, Any]]
 
 @booking_router.post("/bookingUpload")
-async def bookingUpload(payload: BookingUploadPayload,db: AsyncSession = Depends(get_async_db),user = Depends(verify_token)):
-    result = await db.execute(
-        select(Users).where(Users.email == user["email"])
-    )
+async def bookingUpload(
+    payload: BookingUploadPayload,
+    db: AsyncSession = Depends(get_async_db),
+    user = Depends(verify_token)
+):
+    # ---------------- USER VALIDATION ----------------
+    result = await db.execute(select(Users).where(Users.email == user["email"]))
     db_user = result.scalar_one_or_none()
 
     if not db_user:
@@ -119,59 +131,135 @@ async def bookingUpload(payload: BookingUploadPayload,db: AsyncSession = Depends
 
     if not db_user.frenchise_id:
         raise HTTPException(status_code=400, detail="User has no franchise assigned")
-    
+
     frenchise_id = db_user.frenchise_id
+
     if not payload.data:
         return {"message": "No data provided", "saved": []}
 
-    # All column names on DSRRecords model — used to filter out unknown keys
+    # ---------------- CLIENT + SLABS FETCH ----------------
+    client_id = payload.data[0].get("CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="CLIENT_ID missing")
+
+    client = await db.get(Clients, client_id)
+
+    cli_gsts = await db.execute(select(GstPerClient).where(GstPerClient.client_id == client_id))
+    gsts = cli_gsts.scalar_one_or_none()
+
+    rplans = await db.execute(select(RatePlan).where(RatePlan.client_id == client_id))
+    rplans = rplans.scalars().all()
+    rplans_ids = [p.id for p in rplans]
+
+    stmt = (
+        select(RateSlab, RatePlan.transport_type)
+        .join(RatePlan, RateSlab.plan_id == RatePlan.id)
+        .where(RateSlab.plan_id.in_(rplans_ids))
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    slabs_dict = defaultdict(list)
+
+    for slab, transport_type in rows:
+        key = transport_type.strip().lower() if transport_type else "unknown"
+        slabs_dict[key].append([
+            slab.min_weight,
+            slab.max_weight,
+            slab.rate_per_kg
+        ])
+
+    for ttype in slabs_dict:
+        slabs_dict[ttype].sort(key=lambda x: x[0])
+
+    slabs_dict = dict(slabs_dict)
+
+    # ---------------- COLUMN MAP ----------------
     col_map = {c.key: c for c in DSRRecord.__table__.columns}
 
     saved_records = []
 
+    # ---------------- MAIN LOOP ----------------
     for row in payload.data:
-        # Normalize incoming keys to UPPERCASE (already done on frontend, but be safe)
         normalized = {k.upper(): v for k, v in row.items()}
 
-        # Only keep keys that exist in the table, coerce to correct types
         filtered = {}
         for k, v in normalized.items():
             if k in col_map:
                 filtered[k] = coerce_value(col_map[k], v)
 
-        # Always set franchise_id = 1
         filtered["frenchise_id"] = frenchise_id
 
-        # Check if record already exists by DSR_CNNO to avoid duplicates
-        # Match on both DSR_CNNO + DSR_BOOKING_DATE — same combo means same row
+        # ---------------- CALCULATION ----------------
+        chargable_weight = float(filtered.get("CHARGEABLE_WEIGHT") or 0)
+        ttype = (filtered.get("DSR_MODE") or "").strip().lower()
+
+        slab = slabs_dict.get(ttype)
+        if not slab:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No slab found for transport type: {ttype}"
+            )
+
+        # PINCODES
+        client_pin = client.pincode
+        dest_pin = filtered.get("BKG_PINCODE") or filtered.get("DSR_DEST_PIN")
+
+        if not isvalid_pincode(client_pin) or not isvalid_pincode(dest_pin):
+            raise HTTPException(status_code=400, detail="Invalid pincode")
+
+        client_state = get_state_from_pincode(client_pin)
+        dest_state = get_state_from_pincode(dest_pin)
+
+        within_state = client_state == dest_state
+        # TAX %
+        sgst_percent = gsts.sgst
+        cgst_percent = gsts.cgst
+        igst_percent = gsts.igst
+
+        final_amounts = calculate_final_amount(
+            sgst_percent,
+            cgst_percent,
+            igst_percent,
+            chargable_weight,
+            slab,
+            within_state
+        )
+
+        # Inject calculated fields
+        filtered["CGST"] = final_amounts["cgst"]
+        filtered["SGST"] = final_amounts["sgst"]
+        filtered["IGST"] = final_amounts["igst"]
+        filtered["TOTAL_AMOUNT"] = final_amounts["final_amount"]
+
+        # ---------------- UPSERT ----------------
         existing = await db.execute(
             select(DSRRecord).where(
                 DSRRecord.DSR_CNNO == filtered.get("DSR_CNNO"),
                 DSRRecord.DSR_BOOKING_DATE == filtered.get("DSR_BOOKING_DATE")
             )
         )
+
         existing_record = existing.scalar_one_or_none()
 
         if existing_record:
-            # Row exists — update every field in place, preserving its id
             for k, v in filtered.items():
                 setattr(existing_record, k, v if v != "" else None)
             record = existing_record
         else:
-            # Genuinely new row — insert
             record = DSRRecord(**{k: v if v != "" else None for k, v in filtered.items()})
             db.add(record)
 
-        await db.flush()  # get the id before commit
+        await db.flush()
         saved_records.append(record)
 
+    # ---------------- COMMIT ----------------
     await db.commit()
 
-    # Refresh all to get final state with ids
     for record in saved_records:
         await db.refresh(record)
 
-    # Build response — all fields + id, matching what frontend expects
     response_rows = [
         {
             k: (v.isoformat() if hasattr(v, "isoformat") else v)
@@ -185,7 +273,6 @@ async def bookingUpload(payload: BookingUploadPayload,db: AsyncSession = Depends
         "message": f"{len(response_rows)} records saved successfully.",
         "data": response_rows
     }
-
 
 
 class BookingUpdatePayload(BaseModel):
@@ -240,7 +327,20 @@ async def bookingUpdate(payload: BookingUpdatePayload, db: AsyncSession = Depend
 
 
 
-
+def isvalid_pincode(pincode: str) -> bool:
+    # Check if length is 6
+    if len(pincode) != 6:
+        return False
+    
+    # Check if all characters are digits
+    if not pincode.isdigit():
+        return False
+    
+    # Check if it starts with 0
+    if pincode[0] == '0':
+        return False
+    
+    return True
 
 
 
@@ -269,8 +369,44 @@ async def add_booking(
     bookings = payload["bookings"]
     booking_date = parse_date(payload["booking_date"])
 
+    cli_gsts = await db.execute(select(GstPerClient).where(GstPerClient.client_id == client_id))
+    gsts = cli_gsts.scalar_one_or_none()
+
     
     client = await db.get(Clients, client_id)
+    rplans = select(RatePlan).where(RatePlan.client_id == client_id)
+    rplans = await db.execute(rplans)
+    rplans = rplans.scalars().all()
+    rplans_ids = [p.id for p in rplans]
+
+
+
+    stmt = (
+        select(RateSlab, RatePlan.transport_type)
+        .join(RatePlan, RateSlab.plan_id == RatePlan.id)
+        .where(RateSlab.plan_id.in_(rplans_ids))
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # Grouping
+    slabs_dict = defaultdict(list)
+
+    for slab, transport_type in rows:
+        key = transport_type.lower() if transport_type else "unknown"
+        slabs_dict[key].append([
+            slab.min_weight,
+            slab.max_weight,
+            slab.rate_per_kg
+        ])
+
+    # Optional: sort slabs by min_weight for each transport type
+    for ttype in slabs_dict:
+        slabs_dict[ttype].sort(key=lambda x: x[0])
+
+    slabs_dict = dict(slabs_dict)
+
 
     for booking in bookings:
         # Skip invalid DSR_CNNO
@@ -282,6 +418,22 @@ async def add_booking(
                 DSRRecord.DSR_BOOKING_DATE == booking_date
             )
         )
+
+        #else calculate igst , cgst . sgst and total and push in table
+        cli_pin = client.pincode if isvalid_pincode(client.pincode) else booking.get("BKG_PINCODE")
+        cli_state = get_state_from_pincode(client.pincode if isvalid_pincode(client.pincode) else booking.get("BKG_PINCODE"))
+        dest_state = get_state_from_pincode(booking.get("BKG_PINCODE"))
+        sgst_percent = gsts.sgst
+        cgst_percent = gsts.cgst
+        igst_percent = gsts.igst
+        chargable_weight = float(booking.get("CHARGEABLE_WEIGHT") or 0)
+        ttype = (booking.get("DSR_MODE") or "").strip().lower()
+        slab = slabs_dict.get(ttype)
+        if slab == None:
+            raise HTTPException(status_code=404, detail="No valid Slab for this transport type with this client")
+        within_state = cli_state == dest_state
+        final_amounts = calculate_final_amount(sgst_percent , cgst_percent , igst_percent , chargable_weight , slab , within_state)
+
         existing_record = existing.scalar_one_or_none()
         if not existing_record:
             record = DSRRecord(
@@ -289,6 +441,11 @@ async def add_booking(
                 DSR_CUST_CODE=client.dsr_act_cust_code,
                 DSR_ACT_CUST_CODE = client.dsr_act_cust_code,
                 DSR_CNNO=booking.get("DSR_CNNO"),
+                DSR_MODE = booking.get("DSR_MODE"),
+
+                DSR_DEST_PIN = cli_pin,
+
+                BKG_PINCODE = booking.get("BKG_PINCODE"),
                 DSR_REFNO=booking.get("DSR_REF_NO"),
                 CHARGEABLE_WEIGHT=float(booking.get("CHARGEABLE_WEIGHT") or 0),
                 RECEIVER_NAME=booking.get("RECEIVER_NAME") or "",
@@ -298,7 +455,14 @@ async def add_booking(
                 CREDIT_AMT=float(booking.get("CREDIT_AMOUNT") or 0),
                 TRANSACTION_REF_NO=booking.get("TRANSACTION_REFNO") or "",
                 PAYMENT_DATE=booking.get("PAYMENT_DATE"),
-                TOTAL_AMOUNT=float(booking.get("TOTAL_AMOUNT") or 0),
+
+                IGST  = final_amounts.get("igst"),
+                CGST = final_amounts.get("cgst"),
+                SGST = final_amounts.get("sgst"),
+
+
+                TOTAL_AMOUNT=float(final_amounts.get("total")),
+
                 DSR_REMARKS=booking.get("REMARK") or "",
                 DSR_BOOKING_DATE = booking_date,
                 SOFTDATA_UPLOAD_DATE=datetime.datetime.now()

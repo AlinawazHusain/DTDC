@@ -18,6 +18,27 @@ SESSION = aioboto3.Session(
 )
 
 
+
+async def upload_inv_to_railway(file_obj, filename: str) -> str:
+    async with SESSION.client(
+        "s3",
+        endpoint_url=ENDPOINT,
+        config=Config(signature_version="s3v4"),
+    ) as s3:
+
+        await s3.upload_fileobj(
+            Fileobj=file_obj,   # 👈 BytesIO works here
+            Bucket=BUCKET_NAME,
+            Key=filename,
+            ExtraArgs={"ContentType": "application/pdf"},  # important
+        )
+
+
+        url =  f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
+
+    return url
+
+
 async def upload_file_to_railway(file: UploadFile, filename: str) -> str:
     async with SESSION.client(
         "s3",
@@ -31,11 +52,12 @@ async def upload_file_to_railway(file: UploadFile, filename: str) -> str:
         )
 
         # 90 days — max Railway allows
-        url = await s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": BUCKET_NAME, "Key": filename},
-            # ExpiresIn=MAX_EXPIRY,
-        )
+        # url = await s3.generate_presigned_url(
+        #     "get_object",
+        #     Params={"Bucket": BUCKET_NAME, "Key": filename},
+        #     # ExpiresIn=MAX_EXPIRY,
+        # )
+        url = f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
 
     return url
 

@@ -25,7 +25,7 @@ const TABLE_COLS = [
   { key: 'DSR_ACT_CUST_CODE', label: 'Cust Code'    },
   { key: 'DSR_DEST',          label: 'Destination'  },
   { key: 'DSR_DEST_PIN',      label: 'Dest. Pin'    },
-  { key: 'DSR_CN_TYPE',       label: 'Type'         },
+  { key: 'DSR_MODE',       label: 'Type'         },
   { key: 'CHARGEABLE_WEIGHT', label: 'Chg. Wt.'     },
   { key: 'TOTAL_AMOUNT',      label: 'Total'        },
   { key: 'DSR_BOOKING_DATE',  label: 'Booked On'    },
@@ -244,9 +244,10 @@ export default function BookingsPage() {
 
   const [newRows, setNewRows] = useState([{
     DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '',
+    DSR_MODE : '', BKG_PINCODE : '',
     RECEIVER_NAME: '', RECEIVER_PIN: '', CASH_AMOUNT: '',
     UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '', TRANSACTION_REFNO: '',
-    PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '',
+    PAYMENT_DATE: null, REMARK: '',
   }])
 
   // ── Auth helper ─────────────────────────────────────────────────────────
@@ -491,9 +492,10 @@ export default function BookingsPage() {
 
   // ── Add booking helpers ─────────────────────────────────────────────────
   const addNewRow    = () => setNewRows(p => [...p, {
-    DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '', RECEIVER_NAME: '',
+    DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '', 
+    DSR_MODE : '',BKG_PINCODE : '',RECEIVER_NAME: '',
     RECEIVER_PIN: '', CASH_AMOUNT: '', UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '',
-    TRANSACTION_REFNO: '', PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '',
+    TRANSACTION_REFNO: '', PAYMENT_DATE: null, REMARK: '',
   }])
   const removeNewRow = (i) => setNewRows(p => p.filter((_, idx) => idx !== i))
   const handleNewRowChange = (i, key, val) => {
@@ -541,6 +543,8 @@ export default function BookingsPage() {
     if (newRows.some(r => !r.DSR_CNNO))       { addToast('Please add DSR CNNO', 'error'); return }
     if (newRows.some(r => !r.DSR_REF_NO))     { addToast('Please add DSR REF No', 'error'); return }
     if (newRows.some(r => !r.CHARGEABLE_WEIGHT)) { addToast('Please add chargeable weight', 'error'); return }
+    if (newRows.some(r => !r.DSR_MODE)) { addToast('Please add transport mode', 'error'); return }
+    if (newRows.some(r => !r.BKG_PINCODE)) { addToast('Please add bkg pin', 'error'); return }
     try {
       setIsCreating(true)
       await callApi({
@@ -551,9 +555,9 @@ export default function BookingsPage() {
       })
       addToast('Bookings created successfully', 'success')
       setShowAddModal(false)
-      setNewRows([{ DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '', RECEIVER_NAME: '',
+      setNewRows([{ DSR_CNNO: '', DSR_REF_NO: '', CHARGEABLE_WEIGHT: '',DSR_MODE : '',BKG_PINCODE : '', RECEIVER_NAME: '',
         RECEIVER_PIN: '', CASH_AMOUNT: '', UPI_ONLINE_AMOUNT: '', CREDIT_AMOUNT: '',
-        TRANSACTION_REFNO: '', PAYMENT_DATE: null, TOTAL_AMOUNT: '', REMARK: '' }])
+        TRANSACTION_REFNO: '', PAYMENT_DATE: null, REMARK: '' }])
       // Re-run last filter to reflect new data
       if (filterApplied) handleFilter()
     } catch {
@@ -1153,13 +1157,14 @@ export default function BookingsPage() {
             <Input label="DSR CNNO" required value={row.DSR_CNNO} onChange={(e) => handleNewRowChange(index, 'DSR_CNNO', e.target.value)} style={{ minWidth: 140 }} />
             <Input label="DSR REF NO" required value={row.DSR_REF_NO} onChange={(e) => handleNewRowChange(index, 'DSR_REF_NO', e.target.value)} style={{ minWidth: 140 }} />
             <Input label="Chargeable Weight" required value={row.CHARGEABLE_WEIGHT} onChange={(e) => handleNewRowChange(index, 'CHARGEABLE_WEIGHT', e.target.value)} style={{ minWidth: 140 }} />
+            <Input label="DSR_TRANS MODE" required value={row.DSR_MODE} onChange={(e) => handleNewRowChange(index, 'DSR_MODE', e.target.value)} style={{ minWidth: 140 }} />
+            <Input label="BKG_PINCODE" required value={row.BKG_PINCODE} onChange={(e) => handleNewRowChange(index, 'BKG_PINCODE', e.target.value)} style={{ minWidth: 140 }} />
             <Input label="Receiver Name" value={row.RECEIVER_NAME} onChange={(e) => handleNewRowChange(index, 'RECEIVER_NAME', e.target.value)} style={{ minWidth: 120 }} />
             <Input label="Receiver Pin" value={row.RECEIVER_PIN} onChange={(e) => handleNewRowChange(index, 'RECEIVER_PIN', e.target.value)} style={{ minWidth: 100 }} />
             <Input label="Cash Amount" value={row.CASH_AMOUNT} onChange={(e) => handleNewRowChange(index, 'CASH_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
             <Input label="Online Amount" value={row.UPI_ONLINE_AMOUNT} onChange={(e) => handleNewRowChange(index, 'UPI_ONLINE_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
             <Input label="Credit Amount" value={row.CREDIT_AMOUNT} onChange={(e) => handleNewRowChange(index, 'CREDIT_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
             <Input label="Transaction Ref" value={row.TRANSACTION_REFNO} onChange={(e) => handleNewRowChange(index, 'TRANSACTION_REFNO', e.target.value)} style={{ minWidth: 160 }} />
-            <Input label="Total" value={row.TOTAL_AMOUNT} onChange={(e) => handleNewRowChange(index, 'TOTAL_AMOUNT', e.target.value)} style={{ minWidth: 100 }} />
             <Input label="Payment Date" type="date"
               value={row.PAYMENT_DATE ? row.PAYMENT_DATE.toISOString().split('T')[0] : ''}
               onChange={(e) => handleNewRowChange(index, 'PAYMENT_DATE', e.target.value ? new Date(e.target.value) : null)}

@@ -1,5 +1,8 @@
-from datetime import datetime
+from datetime import date 
+from typing import Optional
+from datetime import datetime, time
 
+from bucket_utils import get_url_for_file, upload_inv_to_railway
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.future import select
@@ -8,8 +11,9 @@ from sqlalchemy import or_, desc
 from sqlalchemy.orm import selectinload
 
 from utils import verify_token
+from invoice_pdf_generator import generate_invoice
 from db.db import get_async_db
-from db.tables import Clients, RatePlan, RateSlab, TransportTypes
+from db.tables import Clients, DSRRecord, Frenchise, Invoice, RatePlan, RateSlab, TransportTypes, Users
 
 invoice_router = APIRouter()
 
@@ -20,44 +24,184 @@ invoice_router = APIRouter()
 async def invoice_generate(data:dict,
                            db: AsyncSession = Depends(get_async_db) ,
                            user=Depends(verify_token)):  
+    ids = data.get("booking_ids")
+    query = (
+        select(DSRRecord)
+        .where(DSRRecord.id.in_(ids))
+        .order_by(DSRRecord.id.asc())
+    )
+    result = await db.execute(query)
+    bookings = result.scalars().all()
+
+    data_for_invoice = []
+    client_id = data.get("client_id")
+
+    for booking in bookings:
+        booking_date = booking.DSR_BOOKING_DATE
+        description = f"{booking.DSR_MODE} - to {booking.DSR_DEST} ({booking.DSR_DEST_PIN})"
+
+        this_booking = {
+            "description": description,
+            "dsr_cnno": booking.DSR_CNNO,
+            "dsr_booking_date": booking_date.strftime("%d %b %Y"),
+            "chargeable_weight":booking.CHARGEABLE_WEIGHT,
+            "total_amount":booking.TOTAL_AMOUNT,
+            "igst":booking.IGST,
+            "cgst":booking.CGST,
+            "sgst":booking.SGST
+        }
+
+        data_for_invoice.append(this_booking)
+
     
+    result = await db.execute(
+        select(Users).where(Users.email == user["email"])
+    )
+    db_user = result.scalar_one_or_none()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not db_user.frenchise_id:
+        raise HTTPException(status_code=400, detail="User has no franchise assigned")
+
+    result = await db.execute(
+        select(Frenchise).where(Frenchise.id == db_user.frenchise_id)
+    )
+    frenchise = result.scalar_one_or_none()
+
+    if not frenchise:
+        raise HTTPException(status_code=404, detail="Franchise not found")
+    
+
+
+
+    franchise_data = {
+        "frenchise_name":   frenchise.frenchise_name,
+        "owner_name":        frenchise.owner_name,
+        "phone_number":      frenchise.phone_number,
+        "email":             frenchise.email,
+        "gst_number":        frenchise.gst_number,
+        "tan_number":        frenchise.tan_number,       
+        "frenchise_code":    frenchise.frenchise_code,
+        "city":              frenchise.city,
+        "business_address":  frenchise.business_address,
+        "website_url":       frenchise.website_url,
+        "moto":              frenchise.moto
+    }
+
+
+    client_d = (await db.execute(select(Clients).where(Clients.id == client_id))).scalars().first()
+    if not client_d:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+
+    client_data = {
+        "name":            client_d.name,
+        "cin_number":      client_d.cin_number,                 # omitted — should not appear
+        "phone_number":    client_d.phone_number,
+        "email":           client_d.email,
+        "pincode":         client_d.pincode,
+        "gst_number":      client_d.gst_number,
+        "pan_number":      client_d.pan_number,
+        "tan_number":      client_d.tan_number,                 # omitted — should not appear
+        "payment_term":    client_d.payment_term,
+        "city":            client_d.city,
+        "address":         client_d.address,
+        "dsr_act_cust_code": client_d.dsr_act_cust_code
+    }
+    st = generate_invoice(
+        franchise=franchise_data,
+        client=client_data,
+        bookings=data_for_invoice,
+        output_path="invoice_sample.pdf",
+    )
+    bfr = st.get("buffer")
+    gt = st.get("gt")
+
+    id_str = "_".join(str(i) for i in ids)
+    filename = f"invoices/inv_{id_str}.pdf"
+
+    pdf_url = await upload_inv_to_railway(bfr, filename)
+
+
+    new_invoice = Invoice(
+        client_id=client_id,
+        client_name=client_d.name,
+        booking_count=len(ids),
+        dsr_ids=ids,
+        total_amount=gt,
+        pdf_url=pdf_url,
+        frenchise_id= client_d.frenchise_id
+    )
+
+    db.add(new_invoice)
+    await db.commit()
+    await db.refresh(new_invoice)
+
     return {
-        "invoice_id": 45,
-        "invoice_number": "INV-00045",
-        "client_id": 7,
-        "client_name": "Rahul Enterprises",
-        "total_amount": 12450.00,
-        "booking_count": 3,
-        "status": "Generated",
-        "created_at": "2026-03-29"
+        "invoice_id": new_invoice.id,
+        "invoice_url" : pdf_url
         }
 
 
 
 @invoice_router.get("/invoices")
-async def invoice_generate(db: AsyncSession = Depends(get_async_db) ,
-                           user=Depends(verify_token)):  
+async def get_invoices(client_id: Optional[int] = None,
+                       date_from: Optional[date] = None,
+                       date_to:Optional[date] = None,
+                       db: AsyncSession = Depends(get_async_db) ,
+                       user=Depends(verify_token)):  
+    
+    if not client_id and not date_from:
+        return []
     
 
-    return [
-        {
-            "id": 45,
-            "invoice_number": "INV-00045",
-            "client_id": 7,
-            "client_name": "Rahul Enterprises",
-            "booking_count": 3,
-            "total_amount": 12450.00,
-            "created_at": "2026-03-29",
-            "pdf_url": "https://your-s3-bucket.../INV-00045.pdf"
-        },
-        {
-            "id": 44,
-            "invoice_number": "INV-00044",
-            "client_id": 12,
-            "client_name": "Sharma Logistics",
-            "booking_count": 6,
-            "total_amount": 28900.00,
-            "created_at": "2026-03-27",
-            "pdf_url": "https://your-s3-bucket.../INV-00045.pdf"
+
+    query = select(Invoice).where(
+        Invoice.client_id == client_id
+    )
+
+
+# Convert date strings to datetime if needed
+    if date_from:
+        date_from = datetime.combine(date_from, time.min)  # 00:00:00
+    if date_to:
+        date_to = datetime.combine(date_to, time.max)      # 23:59:59
+
+    if date_from and date_to:
+        query = query.where(Invoice.created_at.between(date_from, date_to))
+
+    elif date_from:
+        query = query.where(Invoice.created_at >= date_from)
+
+    elif date_to:
+        query = query.where(Invoice.created_at <= date_to)
+
+
+    query = query.order_by(desc(Invoice.id))
+
+    result = await db.execute(query)
+
+    all_invoices = result.scalars().all()
+
+    return_data = []
+
+   
+
+    for inv in all_invoices:
+        bd = inv.created_at
+        this_inv = {
+            "id": inv.id,
+            "invoice_number": inv.invoice_number,
+            "client_id": inv.client_id,
+            "client_name": inv.client_name,
+            "booking_count": inv.booking_count,
+            "total_amount": inv.total_amount,
+            "created_at": bd.strftime("%d %b %Y"),
+            "pdf_url": inv.pdf_url
         }
-        ]
+
+        return_data.append(this_inv)
+
+    return return_data

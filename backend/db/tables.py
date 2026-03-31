@@ -209,8 +209,10 @@ class DSRRecord(Base):
 class Invoice(Base):
     __tablename__ = "invoices"
 
+    invoice_seq = Sequence('invoice_seq', start=1, increment=1, metadata=Base.metadata)
+
     id = Column(Integer, primary_key=True, autoincrement=True)
-    invoice_number = Column(String(100), unique=True, nullable=False)
+    invoice_number = Column(String, unique=True, nullable=False, index=True, server_default=text("'INV-' || nextval('invoice_seq'::regclass)"))
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index = True)
     client_name = Column(String)
    
@@ -237,7 +239,7 @@ class RatePlan(Base):
 
     id         = Column(Integer, primary_key=True, autoincrement=True, index = True)
     client_id  = Column(Integer, nullable=False , index = True)  
-    transport_type = Column(String(50), nullable=False)
+    transport_type = Column(String(50), nullable=False , index = True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -278,3 +280,14 @@ class TransportTypes(Base):
     __tablename__ = "transport_types"
     id = Column(Integer, primary_key=True, autoincrement=True , index = True)
     transport_type = Column(String(50), unique = True)
+
+
+
+class GstPerClient(Base):
+    __tablename__ = "gst_per_client"
+
+    id = Column(Integer, primary_key=True, autoincrement=True , index = True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False , index = True)
+    cgst = Column(Float)
+    sgst = Column(Float)
+    igst = Column(Float)

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef , useEffect } from 'react'
 import DashboardLayout from '../../components/layout/DashboardLayout'
 import StatusBadge from '../../components/common/StatusBadge'
 import Button from '../../components/common/Button'
@@ -93,15 +93,72 @@ export default function InvoicesPage() {
   const [generating,      setGenerating]      = useState(false)
   const [downloadingId,   setDownloadingId]   = useState(null)
 
+
+
+
+  // Add these near your other state hooks
+  const [mainFilterClientName, setMainFilterClientName] = useState('')
+  const [mainFilterClientId, setMainFilterClientId] = useState(null)
+  const [mainFilterDateFrom, setMainFilterDateFrom] = useState('')
+  const [mainFilterDateTo, setMainFilterDateTo] = useState('')
+
   // ── Load invoice list on mount / when modal closes ──────────────────────
-  const loadInvoices = useCallback(async () => {
+  // const loadInvoices = useCallback(async () => {
+  //   setInvoicesLoading(true)
+  //   try {
+  //     const data = await callApi({
+  //       url: API.listInvoices,
+  //       method: 'GET',
+  //       headers: { Authorization: `Bearer ${token()}` },
+  //     })
+  //     setInvoices(Array.isArray(data) ? data : data.invoices ?? data.data ?? [])
+  //     setInvoicesLoaded(true)
+  //   } catch {
+  //     addToast('Failed to load invoices.', 'error')
+  //   } finally {
+  //     setInvoicesLoading(false)
+  //   }
+  // }, [])
+  // Inside InvoicesPage component
+
+  // Add a specific handler for the Main Filter client selection
+  const handleMainClientChange = (val) => {
+    setMainFilterClientName(val);
+    setMainFilterClientId(null); // Reset ID while typing
+    fetchSuggestions(val); // This is your existing debounced API call
+  };
+
+  const selectMainSuggestion = (c) => {
+    setMainFilterClientName(c.name);
+    setMainFilterClientId(c.id);
+    setClientSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  const loadInvoices = useCallback(async (manualFilters = null) => {
     setInvoicesLoading(true)
     try {
+      // Use manually passed filters OR the current state
+      const filters = manualFilters || {
+        client_id: mainFilterClientId,
+        date_from: mainFilterDateFrom,
+        date_to: mainFilterDateTo
+      };
+
+      const params = new URLSearchParams()
+      if (filters.client_id) params.append('client_id', filters.client_id)
+      if (filters.date_from) params.append('date_from', filters.date_from)
+      if (filters.date_to)   params.append('date_to',   filters.date_to)
+
+      const queryString = params.toString()
+      const url = queryString ? `${API.listInvoices}?${queryString}` : API.listInvoices
+
       const data = await callApi({
-        url: API.listInvoices,
+        url: url,
         method: 'GET',
         headers: { Authorization: `Bearer ${token()}` },
       })
+      
       setInvoices(Array.isArray(data) ? data : data.invoices ?? data.data ?? [])
       setInvoicesLoaded(true)
     } catch {
@@ -109,10 +166,13 @@ export default function InvoicesPage() {
     } finally {
       setInvoicesLoading(false)
     }
-  }, [])
+  }, [mainFilterClientId, mainFilterDateFrom, mainFilterDateTo, addToast]);
 
-  // Load once on first render
-  useState(() => { loadInvoices() }, [])
+    // Load once on first render
+  // useState(() => { loadInvoices() }, [])
+  useEffect(() => {
+    loadInvoices(); 
+  }, []);
 
   // ── Client autocomplete ─────────────────────────────────────────────────
   const fetchSuggestions = useCallback(
@@ -341,31 +401,76 @@ export default function InvoicesPage() {
       }}>
 
         {/* Toolbar */}
+        {/* Replace the Toolbar section in your JSX with this */}
         <div style={{
-          padding: '14px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
-          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-        }}>
-          <div style={{ position: 'relative', flex: '1 1 280px', minWidth: 220 }}>
-            <span style={{
-              position: 'absolute', left: 10, top: '50%',
-              transform: 'translateY(-50%)', fontSize: 14,
-            }}>🔍</span>
+                    padding: '18px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
+                    background: COLORS.bgPage + '30',
+                    display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap'
+                  }}>
+                    {/* Client Filter */}
+                    <div style={{ flex: '2 1 200px', position: 'relative' }}>
+            <label style={labelStyle}>Filter by Client</label>
             <input
-              value={invSearch}
-              onChange={e => setInvSearch(e.target.value)}
-              placeholder="Search by invoice no. or client name…"
-              style={{
-                width: '100%', padding: '8px 12px 8px 32px', fontSize: 13,
-                border: `1.5px solid ${COLORS.border}`, borderRadius: RADIUS.md,
-                outline: 'none', fontFamily: "'DM Sans', sans-serif", color: COLORS.dark,
-              }}
-              onFocus={e => e.target.style.borderColor = COLORS.primary}
-              onBlur={e  => e.target.style.borderColor = COLORS.border}
+              value={mainFilterClientName}
+              onChange={(e) => handleMainClientChange(e.target.value)}
+              onFocus={() => clientSuggestions.length > 0 && setShowSuggestions(true)}
+              // Use a small delay on blur so the click on a suggestion registers
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              placeholder="All Clients"
+              style={inputStyle}
             />
+            
+            {/* Add this block to show suggestions for the Main Filter */}
+            {showSuggestions && clientSuggestions.length > 0 && !showGenModal && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999,
+                background: '#fff', border: `1px solid ${COLORS.border}`,
+                borderRadius: RADIUS.md, maxHeight: 200, overflowY: 'auto',
+                boxShadow: '0 6px 16px rgba(0,0,0,0.1)', marginTop: 4,
+              }}>
+                {clientSuggestions.map((c, i) => (
+                  <div
+                    key={i}
+                    onMouseDown={() => selectMainSuggestion(c)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      borderBottom: i < clientSuggestions.length - 1 ? `1px solid ${COLORS.grayLight}` : 'none',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = COLORS.bgPage}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                  >
+                    <span style={{ fontWeight: 600, color: COLORS.dark }}>{c.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <span style={{ fontSize: 13, color: COLORS.gray }}>
-            {filteredInvoices.length} of {invoices.length} invoices
-          </span>
+
+          <div style={{ flex: '1 1 140px' }}>
+            <label style={labelStyle}>From</label>
+            <input type="date" value={mainFilterDateFrom} onChange={e => setMainFilterDateFrom(e.target.value)} style={inputStyle} />
+          </div>
+
+          <div style={{ flex: '1 1 140px' }}>
+            <label style={labelStyle}>To</label>
+            <input type="date" value={mainFilterDateTo} onChange={e => setMainFilterDateTo(e.target.value)} style={inputStyle} />
+          </div>
+
+          <Button size="sm" onClick={() => 
+          loadInvoices()}>
+            Apply Filters
+          </Button>
+          
+          <Button variant="outline" size="sm" onClick={() => {
+            setMainFilterClientName(''); 
+            setMainFilterClientId(null);
+            setMainFilterDateFrom(''); 
+            setMainFilterDateTo('');
+            // Explicitly pass empty filters to override state during this specific call
+            loadInvoices({ client_id: null, date_from: '', date_to: '' });
+          }}>
+            Reset
+        </Button>
         </div>
 
         {/* Table */}
@@ -426,13 +531,21 @@ export default function InvoicesPage() {
                       {formatDate(inv.created_at || inv.generated_on)}
                     </td>
 
-                    <td style={{ padding: '13px 16px' }}>
-                      <ActionBtn
-                        label={downloadingId === inv.id ? '⏳' : '📄 Download'}
-                        onClick={() => handleDownload(inv)}
-                        disabled={downloadingId === inv.id || !inv.pdf_url}
-                      />
-                    </td>
+                    <td style={{ padding: '13px 16px', display: 'flex', gap: '8px' }}>
+                    {/* VIEW BUTTON */}
+                    <ActionBtn
+                      label="👁️ View"
+                      onClick={() => window.open(inv.pdf_url, '_blank')}
+                      disabled={!inv.pdf_url}
+                    />
+                    
+                    {/* DOWNLOAD BUTTON */}
+                    <ActionBtn
+                      label={downloadingId === inv.id ? '⏳' : '📄 Download'}
+                      onClick={() => handleDownload(inv)}
+                      disabled={downloadingId === inv.id || !inv.pdf_url}
+                    />
+                  </td>
                   </tr>
                 ))}
               </tbody>
