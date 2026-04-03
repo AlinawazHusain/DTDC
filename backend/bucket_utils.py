@@ -33,8 +33,8 @@ async def upload_inv_to_railway(file_obj, filename: str) -> str:
             ExtraArgs={"ContentType": "application/pdf"},  # important
         )
 
-
-        url =  f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
+        url = await get_url_for_file(filename)
+        # url =  f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
 
     return url
 
@@ -57,7 +57,8 @@ async def upload_file_to_railway(file: UploadFile, filename: str) -> str:
         #     Params={"Bucket": BUCKET_NAME, "Key": filename},
         #     # ExpiresIn=MAX_EXPIRY,
         # )
-        url = f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
+        url = await get_url_for_file(filename)
+        # url = f"{ENDPOINT}/{BUCKET_NAME}/{filename}"
 
     return url
 

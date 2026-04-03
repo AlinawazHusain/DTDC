@@ -23,7 +23,7 @@ invoice_router = APIRouter()
 @invoice_router.post("/invoices/generate")
 async def invoice_generate(data:dict,
                            db: AsyncSession = Depends(get_async_db) ,
-                           user=Depends(verify_token)):  
+                           user=Depends(verify_token)): 
     ids = data.get("booking_ids")
     query = (
         select(DSRRecord)
@@ -113,8 +113,7 @@ async def invoice_generate(data:dict,
     st = generate_invoice(
         franchise=franchise_data,
         client=client_data,
-        bookings=data_for_invoice,
-        output_path="invoice_sample.pdf",
+        bookings=data_for_invoice
     )
     bfr = st.get("buffer")
     gt = st.get("gt")

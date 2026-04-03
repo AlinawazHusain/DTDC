@@ -267,7 +267,10 @@ export default function SignupPage() {
 
               <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                 <BackButton onClick={() => { setStep(0); setErrors({}) }} />
-                <NextButton onClick={handleSubmit} label="Continue to Signup →" flex />
+                <NextButton onClick={handleSubmit}
+                label={loading ? "Signing up..." : "Continue to Signup →"}
+                disabled={loading}   // prevent multiple clicks
+                 flex />
               </div>
             </div>
           )}

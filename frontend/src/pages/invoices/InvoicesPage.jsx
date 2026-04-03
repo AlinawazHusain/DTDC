@@ -74,6 +74,10 @@ export default function InvoicesPage() {
   // ── "Generate Invoice" modal state ──────────────────────────────────────
   const [showGenModal,    setShowGenModal]    = useState(false)
 
+  // ── Generated invoice result popup ──────────────────────────────────────
+  const [generatedInvoice,     setGeneratedInvoice]     = useState(null)  // { invoice_id, invoice_url }
+  const [showInvoiceResult,    setShowInvoiceResult]    = useState(false)
+
   // ── Booking search (inside modal) ───────────────────────────────────────
   const [filterClientName,  setFilterClientName]  = useState('')
   const [filterClientId,    setFilterClientId]    = useState(null)
@@ -93,9 +97,6 @@ export default function InvoicesPage() {
   const [generating,      setGenerating]      = useState(false)
   const [downloadingId,   setDownloadingId]   = useState(null)
 
-
-
-
   // Add these near your other state hooks
   const [mainFilterClientName, setMainFilterClientName] = useState('')
   const [mainFilterClientId, setMainFilterClientId] = useState(null)
@@ -103,29 +104,10 @@ export default function InvoicesPage() {
   const [mainFilterDateTo, setMainFilterDateTo] = useState('')
 
   // ── Load invoice list on mount / when modal closes ──────────────────────
-  // const loadInvoices = useCallback(async () => {
-  //   setInvoicesLoading(true)
-  //   try {
-  //     const data = await callApi({
-  //       url: API.listInvoices,
-  //       method: 'GET',
-  //       headers: { Authorization: `Bearer ${token()}` },
-  //     })
-  //     setInvoices(Array.isArray(data) ? data : data.invoices ?? data.data ?? [])
-  //     setInvoicesLoaded(true)
-  //   } catch {
-  //     addToast('Failed to load invoices.', 'error')
-  //   } finally {
-  //     setInvoicesLoading(false)
-  //   }
-  // }, [])
-  // Inside InvoicesPage component
-
-  // Add a specific handler for the Main Filter client selection
   const handleMainClientChange = (val) => {
     setMainFilterClientName(val);
-    setMainFilterClientId(null); // Reset ID while typing
-    fetchSuggestions(val); // This is your existing debounced API call
+    setMainFilterClientId(null);
+    fetchSuggestions(val);
   };
 
   const selectMainSuggestion = (c) => {
@@ -138,7 +120,6 @@ export default function InvoicesPage() {
   const loadInvoices = useCallback(async (manualFilters = null) => {
     setInvoicesLoading(true)
     try {
-      // Use manually passed filters OR the current state
       const filters = manualFilters || {
         client_id: mainFilterClientId,
         date_from: mainFilterDateFrom,
@@ -168,8 +149,6 @@ export default function InvoicesPage() {
     }
   }, [mainFilterClientId, mainFilterDateFrom, mainFilterDateTo, addToast]);
 
-    // Load once on first render
-  // useState(() => { loadInvoices() }, [])
   useEffect(() => {
     loadInvoices(); 
   }, []);
@@ -260,7 +239,6 @@ export default function InvoicesPage() {
       return
     }
 
-    // Enforce same-client rule
     if (selectedClient && selectedClient.id !== booking.client_id) {
       addToast(
         `All bookings must be from the same client. Currently locked to "${selectedClient.name}".`,
@@ -276,14 +254,12 @@ export default function InvoicesPage() {
   }
 
   const toggleSelectAll = () => {
-    // Only select rows belonging to first selected client (or all if none selected)
     const eligible = bookings.filter(b =>
       b.id && (!selectedClient || b.client_id === selectedClient.id)
     )
     if (selectedIds.length === eligible.length) {
       setSelectedIds([]); setSelectedClient(null)
     } else {
-      // Lock to first booking's client if nothing selected yet
       const firstClient = selectedClient || (eligible[0]
         ? { id: eligible[0].client_id, name: eligible[0].client_name }
         : null)
@@ -302,12 +278,17 @@ export default function InvoicesPage() {
       const result = await callApi({
         url: API.generateInvoice,
         method: 'POST',
-        body: { booking_ids: selectedIds },
+        body: { booking_ids: selectedIds , client_id:filterClientId},
         headers: { Authorization: `Bearer ${token()}` },
       })
-      addToast(`Invoice ${result.invoice_id || ''} generated successfully!`, 'success')
+      // Close the generation modal and show the result popup
       setShowGenModal(false)
       resetModal()
+      setGeneratedInvoice({
+        invoice_id:  result.invoice_id,
+        invoice_url: result.invoice_url,
+      })
+      setShowInvoiceResult(true)
       await loadInvoices()
     } catch {
       addToast('Failed to generate invoice.', 'error')
@@ -339,6 +320,19 @@ export default function InvoicesPage() {
     a.click()
     addToast('Invoice downloaded.', 'success')
     setDownloadingId(null)
+  }
+
+  // ── Download generated invoice from result popup ───────────────────────
+  const handleDownloadGenerated = () => {
+    if (!generatedInvoice?.invoice_url) {
+      addToast('No PDF available.', 'error'); return
+    }
+    const a    = document.createElement('a')
+    a.href     = generatedInvoice.invoice_url
+    a.download = `Invoice_${generatedInvoice.invoice_id}.pdf`
+    a.target   = '_blank'
+    a.click()
+    addToast('Invoice downloaded.', 'success')
   }
 
   // ── Filtered invoice list ───────────────────────────────────────────────
@@ -401,26 +395,22 @@ export default function InvoicesPage() {
       }}>
 
         {/* Toolbar */}
-        {/* Replace the Toolbar section in your JSX with this */}
         <div style={{
-                    padding: '18px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
-                    background: COLORS.bgPage + '30',
-                    display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap'
-                  }}>
-                    {/* Client Filter */}
-                    <div style={{ flex: '2 1 200px', position: 'relative' }}>
+          padding: '18px 20px', borderBottom: `1px solid ${COLORS.grayLight}`,
+          background: COLORS.bgPage + '30',
+          display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap'
+        }}>
+          {/* Client Filter */}
+          <div style={{ flex: '2 1 200px', position: 'relative' }}>
             <label style={labelStyle}>Filter by Client</label>
             <input
               value={mainFilterClientName}
               onChange={(e) => handleMainClientChange(e.target.value)}
               onFocus={() => clientSuggestions.length > 0 && setShowSuggestions(true)}
-              // Use a small delay on blur so the click on a suggestion registers
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               placeholder="All Clients"
               style={inputStyle}
             />
-            
-            {/* Add this block to show suggestions for the Main Filter */}
             {showSuggestions && clientSuggestions.length > 0 && !showGenModal && (
               <div style={{
                 position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999,
@@ -456,8 +446,7 @@ export default function InvoicesPage() {
             <input type="date" value={mainFilterDateTo} onChange={e => setMainFilterDateTo(e.target.value)} style={inputStyle} />
           </div>
 
-          <Button size="sm" onClick={() => 
-          loadInvoices()}>
+          <Button size="sm" onClick={() => loadInvoices()}>
             Apply Filters
           </Button>
           
@@ -466,11 +455,10 @@ export default function InvoicesPage() {
             setMainFilterClientId(null);
             setMainFilterDateFrom(''); 
             setMainFilterDateTo('');
-            // Explicitly pass empty filters to override state during this specific call
             loadInvoices({ client_id: null, date_from: '', date_to: '' });
           }}>
             Reset
-        </Button>
+          </Button>
         </div>
 
         {/* Table */}
@@ -530,22 +518,18 @@ export default function InvoicesPage() {
                     <td style={{ padding: '13px 16px', color: COLORS.gray }}>
                       {formatDate(inv.created_at || inv.generated_on)}
                     </td>
-
                     <td style={{ padding: '13px 16px', display: 'flex', gap: '8px' }}>
-                    {/* VIEW BUTTON */}
-                    <ActionBtn
-                      label="👁️ View"
-                      onClick={() => window.open(inv.pdf_url, '_blank')}
-                      disabled={!inv.pdf_url}
-                    />
-                    
-                    {/* DOWNLOAD BUTTON */}
-                    <ActionBtn
-                      label={downloadingId === inv.id ? '⏳' : '📄 Download'}
-                      onClick={() => handleDownload(inv)}
-                      disabled={downloadingId === inv.id || !inv.pdf_url}
-                    />
-                  </td>
+                      <ActionBtn
+                        label="👁️ View"
+                        onClick={() => window.open(inv.pdf_url, '_blank')}
+                        disabled={!inv.pdf_url}
+                      />
+                      <ActionBtn
+                        label={downloadingId === inv.id ? '⏳' : '📄 Download'}
+                        onClick={() => handleDownload(inv)}
+                        disabled={downloadingId === inv.id || !inv.pdf_url}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -861,6 +845,152 @@ export default function InvoicesPage() {
         </div>
 
       </Modal>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          ── Invoice Generated Result Popup ──
+      ══════════════════════════════════════════════════════════════════════ */}
+      {showInvoiceResult && generatedInvoice && (
+        <div
+          onClick={() => setShowInvoiceResult(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: RADIUS.lg,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+              width: '100%', maxWidth: 440,
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              background: `linear-gradient(135deg, ${COLORS.primary}, ${COLORS.primary}cc)`,
+              padding: '24px 28px',
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 22, flexShrink: 0,
+              }}>
+                ✅
+              </div>
+              <div>
+                <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, fontFamily: "'Syne', sans-serif" }}>
+                  Invoice Generated!
+                </div>
+                <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 2 }}>
+                  Your invoice has been created successfully.
+                </div>
+              </div>
+              <button
+                onClick={() => setShowInvoiceResult(false)}
+                style={{
+                  marginLeft: 'auto', background: 'rgba(255,255,255,0.15)',
+                  border: 'none', borderRadius: '50%', width: 30, height: 30,
+                  cursor: 'pointer', color: '#fff', fontSize: 16,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '24px 28px' }}>
+              {/* Invoice ID row */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: COLORS.bgPage, borderRadius: RADIUS.md,
+                padding: '14px 16px', marginBottom: 16,
+                border: `1px solid ${COLORS.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+                    Invoice ID
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.primary, fontFamily: "'Syne', sans-serif" }}>
+                    {generatedInvoice.invoice_id
+                      ? `INV-${String(generatedInvoice.invoice_id).padStart(5, '0')}`
+                      : '—'}
+                  </div>
+                </div>
+                <InvStatusBadge status="Generated" />
+              </div>
+
+              {/* PDF preview link */}
+              {generatedInvoice.invoice_url && (
+                <a
+                  href={generatedInvoice.invoice_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '12px 16px', borderRadius: RADIUS.md,
+                    border: `1.5px dashed ${COLORS.border}`,
+                    textDecoration: 'none', marginBottom: 20,
+                    color: COLORS.dark, fontSize: 13,
+                    transition: 'border-color 0.15s, background 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.primary; e.currentTarget.style.background = COLORS.primary + '06' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.background = 'transparent' }}
+                >
+                  <span style={{ fontSize: 22 }}>📄</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>View Invoice PDF</div>
+                    <div style={{
+                      fontSize: 11, color: COLORS.gray,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {generatedInvoice.invoice_url}
+                    </div>
+                  </div>
+                  <span style={{ color: COLORS.primary, fontSize: 16 }}>↗</span>
+                </a>
+              )}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={handleDownloadGenerated}
+                  disabled={!generatedInvoice.invoice_url}
+                  style={{
+                    flex: 1, padding: '11px 0', borderRadius: RADIUS.md,
+                    background: COLORS.primary, color: '#fff',
+                    border: 'none', fontWeight: 700, fontSize: 13,
+                    cursor: generatedInvoice.invoice_url ? 'pointer' : 'not-allowed',
+                    opacity: generatedInvoice.invoice_url ? 1 : 0.5,
+                    fontFamily: "'DM Sans', sans-serif",
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  📥 Download PDF
+                </button>
+                <button
+                  onClick={() => setShowInvoiceResult(false)}
+                  style={{
+                    flex: 1, padding: '11px 0', borderRadius: RADIUS.md,
+                    background: COLORS.bgPage, color: COLORS.dark,
+                    border: `1.5px solid ${COLORS.border}`, fontWeight: 600, fontSize: 13,
+                    cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

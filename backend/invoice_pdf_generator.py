@@ -68,8 +68,7 @@ def generate_invoice(
     client,
     bookings: List,
     invoice_number: Optional[str] = None,
-    invoice_date: Optional[str] = None,
-    output_path: str = "invoice.pdf",
+    invoice_date: Optional[str] = None
 ) -> str:
     """
     Generate a professional invoice PDF.
