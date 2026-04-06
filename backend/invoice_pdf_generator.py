@@ -35,6 +35,7 @@ from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 PRIMARY   = colors.HexColor("#1A3C6E")   # deep navy
+PROFORMA_PRIMARY = colors.HexColor("#D4A017") 
 ACCENT    = colors.HexColor("#2D7DD2")   # sky blue
 LIGHT_BG  = colors.HexColor("#F0F4FA")   # very light blue-grey
 BORDER    = colors.HexColor("#C8D6E8")
@@ -68,8 +69,9 @@ def generate_invoice(
     client,
     bookings: List,
     invoice_number: Optional[str] = None,
-    invoice_date: Optional[str] = None
-) -> str:
+    invoice_date: Optional[str] = None,
+    is_proforma: bool = False
+):
     """
     Generate a professional invoice PDF.
 
@@ -96,7 +98,13 @@ def generate_invoice(
     if not invoice_number:
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
         fc = (_get(franchise, "frenchise_code") or "INV").upper()
-        invoice_number = f"{fc}-{ts}"
+
+        if is_proforma:
+            invoice_number = f"PI-{fc}-{ts}"   
+        else:
+            invoice_number = f"{fc}-{ts}"
+        # fc = (_get(franchise, "frenchise_code") or "INV").upper()
+        # invoice_number = f"{fc}-{ts}"
 
     if not invoice_date:
         invoice_date = datetime.now().strftime("%d %b %Y")
@@ -114,7 +122,7 @@ def generate_invoice(
     story  = []
 
     # ── 1. Header band ────────────────────────────────────────────────────────
-    story += _header_section(franchise, invoice_number, invoice_date, styles)
+    story += _header_section(franchise, invoice_number, invoice_date, styles , is_proforma)
 
     # ── 2. Bill-from / Bill-to ────────────────────────────────────────────────
     story += _parties_section(franchise, client, styles)
@@ -131,10 +139,20 @@ def generate_invoice(
     story += ts.get("tbl")
     gt = ts.get("st")
 
+    if is_proforma:
+        story.append(Spacer(1, 4*mm))
+        story.append(
+            Paragraph(
+                "This is a PROFORMA INVOICE and not a tax invoice. "
+                "It is issued for estimation purposes only. "
+                "Final invoice will be generated after confirmation.",
+                styles["FooterText"]
+            )
+        )
     story.append(Spacer(1, 8*mm))
 
     # ── 5. Footer ─────────────────────────────────────────────────────────────
-    story += _footer_section(franchise, styles)
+    story += _footer_section(franchise, styles , is_proforma)
 
     doc.build(story)
     buffer.seek(0)
@@ -227,7 +245,7 @@ def _build_styles():
 
 # ── Section builders ──────────────────────────────────────────────────────────
 
-def _header_section(franchise, inv_no, inv_date, styles):
+def _header_section(franchise, inv_no, inv_date, styles , is_proforma):
     """Top navy band with company name + invoice meta."""
     company_name = _get(franchise, "frenchise_name") or "Company Name"
     moto         = _get(franchise, "moto") or ""
@@ -247,8 +265,9 @@ def _header_section(franchise, inv_no, inv_date, styles):
         )
 
     # Right cell: invoice meta
+    title = "PROFORMA INVOICE" if is_proforma else "TAX INVOICE"
     right_content = [
-        Paragraph("TAX INVOICE", ParagraphStyle(
+        Paragraph(title, ParagraphStyle(
             "BigInv", fontSize=16, fontName="Helvetica-Bold",
             textColor=colors.HexColor("#B0C8E8"), alignment=TA_RIGHT)),
         Spacer(1, 4*mm),
@@ -263,8 +282,10 @@ def _header_section(franchise, inv_no, inv_date, styles):
         [[left_content, right_content]],
         colWidths=["60%", "40%"],
     )
-    header_table.setStyle(TableStyle([
-        ("BACKGROUND",  (0, 0), (-1, -1), PRIMARY),
+
+    if is_proforma:
+        header_table.setStyle(TableStyle([
+        ("BACKGROUND",  (0, 0), (-1, -1), PROFORMA_PRIMARY),
         ("VALIGN",      (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING",  (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING",(0,0), (-1, -1), 10),
@@ -272,6 +293,17 @@ def _header_section(franchise, inv_no, inv_date, styles):
         ("RIGHTPADDING",(1, 0), (1,  -1), 12),
         ("ROUNDEDCORNERS", [6, 6, 6, 6]),
     ]))
+    
+    else:
+        header_table.setStyle(TableStyle([
+            ("BACKGROUND",  (0, 0), (-1, -1), PRIMARY),
+            ("VALIGN",      (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING",  (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING",(0,0), (-1, -1), 10),
+            ("LEFTPADDING", (0, 0), (0,  -1), 12),
+            ("RIGHTPADDING",(1, 0), (1,  -1), 12),
+            ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+        ]))
 
     return [header_table, Spacer(1, 5*mm)]
 
@@ -464,7 +496,7 @@ def _tax_summary(bookings, styles):
     return {"tbl" : [tbl] , "st" : grand}
 
 
-def _footer_section(franchise, styles):
+def _footer_section(franchise, styles , is_proforma):
     """Bank / signature / terms footer."""
     phone   = _get(franchise, "phone_number")
     email   = _get(franchise, "email")
@@ -474,8 +506,17 @@ def _footer_section(franchise, styles):
     contact_parts = [p for p in [phone, email, website] if p]
     contact_str   = "   |   ".join(contact_parts)
 
-    return [
+    st = [
         HRFlowable(width="100%", thickness=0.5, color=BORDER),
+        Spacer(1, 3*mm),
+    ]
+
+    if is_proforma:
+        st.append(
+            Paragraph("No payment is due for this document.", styles["FooterText"])
+        )
+
+    res_data =  [
         Spacer(1, 3*mm),
         Paragraph(
             "This is a computer-generated invoice and does not require a physical signature.",
@@ -492,6 +533,9 @@ def _footer_section(franchise, styles):
             styles["FooterBold"]
         ),
     ]
+
+    st.extend(res_data)
+    return st
 
 
 # ── Demo / quick-test ─────────────────────────────────────────────────────────

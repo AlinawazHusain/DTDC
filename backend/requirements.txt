@@ -16,6 +16,7 @@ cffi==2.0.0
 charset-normalizer==3.4.6
 click==8.3.1
 cryptography==46.0.5
+docopt==0.6.2
 et_xmlfile==2.0.0
 fastapi==0.135.1
 frozenlist==1.8.0
@@ -24,6 +25,7 @@ h11==0.16.0
 idna==3.11
 jmespath==1.1.0
 multidict==6.7.1
+num2words==0.5.14
 numpy==2.4.3
 openpyxl==3.1.5
 pandas==3.0.1
@@ -46,4 +48,3 @@ urllib3==2.6.3
 uvicorn==0.42.0
 wrapt==1.17.3
 yarl==1.23.0
-num2words

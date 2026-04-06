@@ -221,6 +221,7 @@ class Invoice(Base):
 
     total_amount = Column(Float, nullable=False, default=0.0)
     pdf_url = Column(String)
+    invoice_type = Column(String)
     created_at = Column(DateTime, default=datetime.now)
 
     frenchise_id = Column(Integer, ForeignKey("frenchise.id"), nullable=False , index = True)

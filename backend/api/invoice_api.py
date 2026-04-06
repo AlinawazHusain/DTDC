@@ -1,4 +1,5 @@
 from datetime import date 
+from enum import Enum
 from typing import Optional
 from datetime import datetime, time
 
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, desc
 from sqlalchemy.orm import selectinload
 
@@ -25,6 +27,7 @@ async def invoice_generate(data:dict,
                            db: AsyncSession = Depends(get_async_db) ,
                            user=Depends(verify_token)): 
     ids = data.get("booking_ids")
+    invoice_type = data.get("invoice_type")
     query = (
         select(DSRRecord)
         .where(DSRRecord.id.in_(ids))
@@ -113,13 +116,14 @@ async def invoice_generate(data:dict,
     st = generate_invoice(
         franchise=franchise_data,
         client=client_data,
-        bookings=data_for_invoice
+        bookings=data_for_invoice,
+        is_proforma=invoice_type == 'proforma'
     )
     bfr = st.get("buffer")
     gt = st.get("gt")
 
     id_str = "_".join(str(i) for i in ids)
-    filename = f"invoices/inv_{id_str}.pdf"
+    filename = f"proforma_invoices/inv_{id_str}.pdf" if invoice_type == 'proforma' else f"invoices/inv_{id_str}.pdf"
 
     pdf_url = await upload_inv_to_railway(bfr, filename)
 
@@ -131,6 +135,7 @@ async def invoice_generate(data:dict,
         dsr_ids=ids,
         total_amount=gt,
         pdf_url=pdf_url,
+        invoice_type = invoice_type,
         frenchise_id= client_d.frenchise_id
     )
 
@@ -146,7 +151,8 @@ async def invoice_generate(data:dict,
 
 
 @invoice_router.get("/invoices")
-async def get_invoices(client_id: Optional[int] = None,
+async def get_invoices(invoice_type:Optional[str] = None,
+                       client_id: Optional[int] = None,
                        date_from: Optional[date] = None,
                        date_to:Optional[date] = None,
                        db: AsyncSession = Depends(get_async_db) ,
@@ -177,6 +183,8 @@ async def get_invoices(client_id: Optional[int] = None,
     elif date_to:
         query = query.where(Invoice.created_at <= date_to)
 
+    if invoice_type:
+        query = query.where(Invoice.invoice_type == invoice_type)
 
     query = query.order_by(desc(Invoice.id))
 
@@ -197,6 +205,7 @@ async def get_invoices(client_id: Optional[int] = None,
             "client_name": inv.client_name,
             "booking_count": inv.booking_count,
             "total_amount": inv.total_amount,
+            "invoice_type" : inv.invoice_type,
             "created_at": bd.strftime("%d %b %Y"),
             "pdf_url": inv.pdf_url
         }
@@ -204,3 +213,79 @@ async def get_invoices(client_id: Optional[int] = None,
         return_data.append(this_inv)
 
     return return_data
+
+
+
+
+
+import io, csv
+
+
+@invoice_router.get("/invoices/export")
+async def export_invoices(invoice_type: Optional[str] = Query(None),
+                          client_id:    Optional[int]         = Query(None),
+                          date_from:    Optional[date]        = Query(None),
+                          date_to:      Optional[date]        = Query(None),
+                          db: AsyncSession = Depends(get_async_db) ,
+                          user=Depends(verify_token)):
+      
+    if not client_id and not date_from:
+        raise HTTPException(status_code=404, detail="Client or date from not found")
+    
+    query = select(Invoice).where(
+        Invoice.client_id == client_id
+    )
+
+
+    if date_from:
+        date_from = datetime.combine(date_from, time.min)  # 00:00:00
+    if date_to:
+        date_to = datetime.combine(date_to, time.max)      # 23:59:59
+
+    if date_from and date_to:
+        query = query.where(Invoice.created_at.between(date_from, date_to))
+
+    elif date_from:
+        query = query.where(Invoice.created_at >= date_from)
+
+    elif date_to:
+        query = query.where(Invoice.created_at <= date_to)
+
+    if invoice_type:
+        query = query.where(Invoice.invoice_type == invoice_type)
+
+    query = query.order_by(desc(Invoice.id))
+
+    result = await db.execute(query)
+
+    all_invoices = result.scalars().all()
+    
+
+    rows = [
+        {
+            "Invoice Number": inv.invoice_number or f"INV-{str(inv.id).zfill(5)}",
+            "Type":           "Proforma" if inv.invoice_type == "proforma" else "Tax Invoice",
+            "Client":         inv.client_name or "",
+            "Bookings":       inv.booking_count or 0,
+            "Total Amount":   float(inv.total_amount or 0),
+            "Generated On":   inv.created_at.strftime("%d/%m/%Y") if inv.created_at else "",
+            "PDF URL":        inv.pdf_url or "",
+        }
+        for inv in all_invoices
+    ]
+
+    return _export_csv(rows)
+
+
+def _export_csv(rows: list) -> StreamingResponse:
+    output = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=invoices.csv"},
+    )
